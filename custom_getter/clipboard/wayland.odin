@@ -57,10 +57,6 @@ wayland_set_text :: proc(text: string) -> bool {
 }
 
 
-// ------------------------------------------------------------
-// Text
-// ------------------------------------------------------------
-
 wayland_get_text :: proc() -> (string, bool) {
 	data, ok := wayland_get_mime("text/plain")
 
@@ -72,10 +68,7 @@ wayland_get_text :: proc() -> (string, bool) {
 }
 
 
-// ------------------------------------------------------------
 // Get arbitrary MIME type
-// ------------------------------------------------------------
-
 wayland_get_mime :: proc(mime: string) -> ([]u8, bool) {
 	desc := os.Process_Desc{
 		command = []string{
@@ -111,10 +104,7 @@ wayland_get_mime :: proc(mime: string) -> ([]u8, bool) {
 }
 
 
-// ------------------------------------------------------------
 // Available MIME types
-// ------------------------------------------------------------
-
 wayland_get_types :: proc() -> ([]string, bool) {
 	desc := os.Process_Desc{
 		command = []string{
@@ -179,10 +169,7 @@ wayland_has_type :: proc(types: []string, wanted: string) -> bool {
 }
 
 
-// ------------------------------------------------------------
 // Generic clipboard retrieval
-// ------------------------------------------------------------
-
 wayland_get :: proc() -> (Clipboard_Data, bool) {
 	types, ok := wayland_get_types()
 
@@ -198,10 +185,7 @@ wayland_get :: proc() -> (Clipboard_Data, bool) {
 		delete(types)
 	}
 
-	// --------------------------------------------------------
 	// Files
-	// --------------------------------------------------------
-
 	if wayland_has_type(types, "text/uri-list") {
 		data, ok := wayland_get_mime("text/uri-list")
 
@@ -213,10 +197,7 @@ wayland_get :: proc() -> (Clipboard_Data, bool) {
 		}
 	}
 
-	// --------------------------------------------------------
 	// Text
-	// --------------------------------------------------------
-
 	if wayland_has_type(types, "text/plain") {
 		data, ok := wayland_get_mime("text/plain")
 
@@ -239,10 +220,7 @@ wayland_get :: proc() -> (Clipboard_Data, bool) {
 		}
 	}
 
-	// --------------------------------------------------------
 	// Images
-	// --------------------------------------------------------
-
 	if wayland_has_type(types, "image/png") {
 		data, ok := wayland_get_mime("image/png")
 

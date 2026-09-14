@@ -20,10 +20,6 @@ x11_create :: proc() -> (Clipboard, bool) {
 }
 
 
-// ------------------------------------------------------------
-// Set text
-// ------------------------------------------------------------
-
 x11_set_text :: proc(text: string) -> bool {
 	read_pipe, write_pipe, err := os.pipe()
 
@@ -74,10 +70,6 @@ x11_set_text :: proc(text: string) -> bool {
 }
 
 
-// ------------------------------------------------------------
-// Get arbitrary X11 target
-// ------------------------------------------------------------
-
 x11_get_target :: proc(target: string) -> ([]u8, bool) {
 	desc := os.Process_Desc{
 		command = []string{
@@ -116,10 +108,7 @@ x11_get_target :: proc(target: string) -> ([]u8, bool) {
 }
 
 
-// ------------------------------------------------------------
 // Text
-// ------------------------------------------------------------
-
 x11_get_text :: proc() -> (string, bool) {
 	data, ok := x11_get_target("UTF8_STRING")
 
@@ -142,10 +131,6 @@ x11_get_text :: proc() -> (string, bool) {
 	return "", false
 }
 
-
-// ------------------------------------------------------------
-// Available X11 targets
-// ------------------------------------------------------------
 
 x11_get_targets :: proc() -> ([]string, bool) {
 	desc := os.Process_Desc{
@@ -214,10 +199,7 @@ x11_has_target :: proc(targets: []string, wanted: string) -> bool {
 }
 
 
-// ------------------------------------------------------------
 // Generic clipboard retrieval
-// ------------------------------------------------------------
-
 x11_get :: proc() -> (Clipboard_Data, bool) {
 	targets, ok := x11_get_targets()
 
@@ -233,10 +215,7 @@ x11_get :: proc() -> (Clipboard_Data, bool) {
 		delete(targets)
 	}
 
-	// --------------------------------------------------------
 	// Files
-	// --------------------------------------------------------
-
 	if x11_has_target(targets, "text/uri-list") {
 		data, ok := x11_get_target("text/uri-list")
 
@@ -248,10 +227,7 @@ x11_get :: proc() -> (Clipboard_Data, bool) {
 		}
 	}
 
-	// --------------------------------------------------------
 	// UTF-8 text
-	// --------------------------------------------------------
-
 	if x11_has_target(targets, "UTF8_STRING") {
 		data, ok := x11_get_target("UTF8_STRING")
 
@@ -263,10 +239,7 @@ x11_get :: proc() -> (Clipboard_Data, bool) {
 		}
 	}
 
-	// --------------------------------------------------------
 	// Standard text
-	// --------------------------------------------------------
-
 	if x11_has_target(targets, "text/plain") {
 		data, ok := x11_get_target("text/plain")
 
@@ -278,10 +251,7 @@ x11_get :: proc() -> (Clipboard_Data, bool) {
 		}
 	}
 
-	// --------------------------------------------------------
 	// Older X11 text
-	// --------------------------------------------------------
-
 	if x11_has_target(targets, "STRING") {
 		data, ok := x11_get_target("STRING")
 
@@ -293,10 +263,7 @@ x11_get :: proc() -> (Clipboard_Data, bool) {
 		}
 	}
 
-	// --------------------------------------------------------
 	// PNG
-	// --------------------------------------------------------
-
 	if x11_has_target(targets, "image/png") {
 		data, ok := x11_get_target("image/png")
 
@@ -308,10 +275,7 @@ x11_get :: proc() -> (Clipboard_Data, bool) {
 		}
 	}
 
-	// --------------------------------------------------------
 	// JPEG
-	// --------------------------------------------------------
-
 	if x11_has_target(targets, "image/jpeg") {
 		data, ok := x11_get_target("image/jpeg")
 
