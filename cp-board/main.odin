@@ -40,6 +40,7 @@ ClipBoard :: struct {
 
 Worker_Data :: struct {
 	ch: chan.Chan(string),
+	 running: ^bool,
 }
 
 main :: proc() {
@@ -77,6 +78,7 @@ main :: proc() {
 	
 	data := new(Worker_Data)
 	data.ch = ch
+	data.running = &app.running
 	defer free(data)
 
 	worker := thread.create_and_start_with_data(data, clipboard_worker_thred)
@@ -139,12 +141,12 @@ clipboard :: proc() -> ClipBoard {
 
 clipboard_worker_thred :: proc(data: rawptr){
 	wd := cast(^Worker_Data)data
-	clipboard_worker(wd.ch)
+	clipboard_worker(wd.ch, wd.running)
 }
 
-clipboard_worker :: proc(ch: chan.Chan(string)) {
+clipboard_worker :: proc(ch: chan.Chan(string), running: ^bool) {
 	previous := ""
-	for {
+	for running^{
 		current := clipboard().content;
 		if current != previous {
 			fmt.printfln("sending changed content to channel : \"%s\"", current);
@@ -152,5 +154,8 @@ clipboard_worker :: proc(ch: chan.Chan(string)) {
 			previous = current;
 		}
 		time.sleep(100 * time.Millisecond);
+	}
+	if(!running^){
+		fmt.println("exiting ...");
 	}
 }
