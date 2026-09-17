@@ -36,23 +36,26 @@ Worker_Data :: struct {
 init_storage :: proc() -> (data_dir, db_path, blob_dir: string, ok: bool) {
 	data_dir = get_data_dir()
 
-	if err := os.make_directory_all(data_dir); err != os.ERROR_NONE && err != os.ERROR_EXISTS {
-		fmt.eprintfln("failed to create data dir: %v", err)
-		return "", "", "", false
+	if !os.exists(data_dir) {
+		if err := os.make_directory_all(data_dir); err != nil {
+			fmt.eprintfln("failed to create data dir: %v", err)
+			return "", "", "", false
+		}
 	}
 
 	blob_dir = fmt.aprintf("%s/%s", data_dir, BLOB_DIR_NAME)
 
-	if err := os.make_directory_all(blob_dir); err != os.ERROR_NONE && err != os.ERROR_EXISTS {
-		fmt.eprintfln("failed to create blob directory: %v", err)
-		return "", "", "", false
+	if !os.exists(blob_dir) {
+		if err := os.make_directory_all(blob_dir); err != nil {
+			fmt.eprintfln("failed to create blob directory: %v", err)
+			return "", "", "", false
+		}
 	}
 
 	db_path = fmt.aprintf("%s/%s", data_dir, DB_FILE_NAME)
 
 	return data_dir, db_path, blob_dir, true
 }
-
 
 
 
