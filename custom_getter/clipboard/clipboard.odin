@@ -1,6 +1,7 @@
 package clipboard
 
 import "core:os"
+import sdl "vendor:sdl3"
 
 Backend :: enum {
 	None,
@@ -125,3 +126,24 @@ backend_name :: proc(cb: ^Clipboard) -> string {
 
 	return "Unknown"
 }
+
+// set_sdl_clipboard_content :: proc(data: []u8, mime: string) -> bool {
+// 	sdl.SetClipboardData()
+// }
+
+// set_content :: proc(cb: ^Clipboard, content: Clipboard_Data) -> bool {
+// 	switch cb.backend {
+// 	case .Wayland:
+// 		return wayland_set_content(content)
+
+// 	case .X11:
+// 		return x11_set_content(content)
+
+// 	case .None:
+// 		return false
+// 	}
+
+// 	return false
+// }
+
+

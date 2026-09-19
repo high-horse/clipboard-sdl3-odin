@@ -14,7 +14,7 @@ WIDTH :: 600
 APP_NAME :: "SDL3 odin Clipboard Manager"
 APP_ID :: "com.example.odinsdl3clipboardmanager"
 BLOB_DIR_NAME :: "blobs"
-DB_FILE_NAME :: "clipboard.db"
+DB_FILE_NAME :: "cd.slm"
 APP_DATA_DIR :: "sdl3-clipboard-manager"
 
 
@@ -83,7 +83,7 @@ main :: proc() {
 	}
 	defer sdl.Quit()
 
-	database, ok := database_init()
+	ok := database_init()
 	if !ok {
 		fmt.eprintfln("failed to init database")
 		return
@@ -123,9 +123,20 @@ main :: proc() {
 	data.ch = ch
 	data.running = &app.running
 	defer free(data)
+	
 
 	worker := thread.create_and_start_with_data(data, clipboard_worker_thred)
 
+	text_to_copy := "sdl.SetClipboardData() is working!"
+    db_content := database_content {
+        data         = transmute([]u8)(text_to_copy), // Use '=' instead of ':'
+        mime         = "text/plain",
+        hash         = "",
+        content_path = "",
+    }
+    fmt.println("setting contne")
+    set_content(&db_content)
+	
 	mainloop(&app, ch)
 	thread.join(worker)
 }

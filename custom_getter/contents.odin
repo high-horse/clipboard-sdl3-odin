@@ -1,18 +1,12 @@
 package main
 
+import "core:fmt"
+import "clipboard"
 import "core:hash"
 
-database_content :: struct {
-	data:         []u8,
-	mime:         string,
-	hash:         string,
-	content_path: string,
-}
 
-set_data :: proc() {
-
-}
-
-get_data :: proc() {
-
+set_content :: proc(db_content: ^database_content) -> bool {
+	fmt.println("set_content", string(db_content.data))
+	ok := clipboard.set_custom_clipboard_data(db_content.data, db_content.mime)
+	return ok
 }

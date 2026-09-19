@@ -9,6 +9,12 @@ import "clipboard"
 
 import sdl "vendor:sdl3"
 
+database_content :: struct {
+	data:         []u8,
+	mime:         string,
+	hash:         string,
+	content_path: string,
+}
 
 watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 	cb, ok := clipboard.create()
@@ -63,6 +69,19 @@ watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 				case:
 					fmt.printf("Clipboard contains unsupported MIME type: %s\n", data.mime)
 				}
+
+				// hash_str := fmt.aprintf("%x", current_hash[:], allocator = context.temp_allocator)
+				// hash_str, _ := hex.encode(current_hash[:], context.temp_allocator)
+				hash_str := fmt.tprintf("%x", string(current_hash[:]))
+				db_content := database_content {
+					data = data.data,
+					mime = data.mime,
+					hash = hash_str,
+				}
+				if ok := set_db_content_with_blob(&db_content); !ok {
+					fmt.println("Failed to set database content with blob")
+				}
+				
 			}
 
 		}
