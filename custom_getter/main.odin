@@ -1,9 +1,9 @@
 package main
 
 import "core:fmt"
+import "core:os"
 import "core:sync/chan"
 import "core:thread"
-import "core:os"
 
 import sdl "vendor:sdl3"
 
@@ -16,7 +16,6 @@ APP_ID :: "com.example.odinsdl3clipboardmanager"
 BLOB_DIR_NAME :: "blobs"
 DB_FILE_NAME :: "clipboard.db"
 APP_DATA_DIR :: "sdl3-clipboard-manager"
-
 
 
 AppState :: struct {
@@ -57,7 +56,6 @@ init_storage :: proc() -> (data_dir, db_path, blob_dir: string, ok: bool) {
 }
 
 
-
 get_data_dir :: proc() -> string {
 	xdg := os.get_env("XDG_DATA_HOME", context.allocator)
 	if xdg != "" {
@@ -84,12 +82,12 @@ main :: proc() {
 		return
 	}
 	defer sdl.Quit()
-	
+
 	database, ok := database_init()
-    if !ok {
-    	fmt.eprintfln("failed to init database")
-        return
-    }
+	if !ok {
+		fmt.eprintfln("failed to init database")
+		return
+	}
 
 	app := AppState {
 		height      = HEIGHT,

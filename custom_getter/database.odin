@@ -24,10 +24,10 @@ database_init :: proc() -> (Database, bool) {
 	fmt.println("Database:", db_path)
 	fmt.println("Blobs:", blob_dir)
 
-	database := Database{
+	database := Database {
 		data_dir = data_dir,
-		blob_dir  = blob_dir,
-		db_path   = db_path,
+		blob_dir = blob_dir,
+		db_path  = db_path,
 	}
 
 	if !connect(&database) {

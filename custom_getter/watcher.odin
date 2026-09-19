@@ -1,9 +1,9 @@
 package main
 
+import "core:crypto/hash"
 import "core:fmt"
 import "core:strings"
 import "core:time"
-import "core:crypto/hash"
 
 import "clipboard"
 
@@ -117,8 +117,8 @@ watch_clipboard_get_generic :: proc(wd: ^Worker_Data) {
 		}
 		time.sleep(100 * time.Millisecond)
 	}
-	if(!wd.running^){
-		fmt.println("exiting ...");
+	if (!wd.running^) {
+		fmt.println("exiting ...")
 	}
 }
 
@@ -137,7 +137,7 @@ watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 
 	for wd.running^ {
 		data, ok := clipboard.get(&cb)
-		if ok{
+		if ok {
 			defer delete(data.data)
 
 			ctx: hash.Context
@@ -153,7 +153,11 @@ watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 				last_hash = current_hash
 				has_last_hash = true
 
-				fmt.printf("Clipboard changed: mime=%s, size=%d bytes\n", data.mime, len(data.data))
+				fmt.printf(
+					"Clipboard changed: mime=%s, size=%d bytes\n",
+					data.mime,
+					len(data.data),
+				)
 				switch data.mime {
 				case "text/plain":
 					text := transmute(string)data.data
@@ -172,13 +176,13 @@ watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 					fmt.printf("Clipboard contains unsupported MIME type: %s\n", data.mime)
 				}
 			}
-			
+
 		}
 	}
 	if !wd.running^ {
 		fmt.println("exiting ...")
 	}
-	
+
 }
 
 
@@ -190,16 +194,16 @@ sdl_board :: proc(wd: ^Worker_Data) {
 
 sdl_clipboard_worker :: proc(wd: ^Worker_Data) {
 	previous := ""
-	for wd.running^{
-		raw := sdl.GetClipboardText();
-		current := strings.clone(string(cstring(raw)));
-		if current != previous{
-			previous = current;
-			fmt.println("content changed");
+	for wd.running^ {
+		raw := sdl.GetClipboardText()
+		current := strings.clone(string(cstring(raw)))
+		if current != previous {
+			previous = current
+			fmt.println("content changed")
 		}
-		time.sleep(100 * time.Millisecond);
+		time.sleep(100 * time.Millisecond)
 	}
-	if(!wd.running^){
-		fmt.println("exiting goodbye...");
+	if (!wd.running^) {
+		fmt.println("exiting goodbye...")
 	}
 }
