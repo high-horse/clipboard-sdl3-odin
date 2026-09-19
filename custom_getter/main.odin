@@ -53,7 +53,6 @@ init_storage :: proc() -> (data_dir, db_path, blob_dir: string, ok: bool) {
 	}
 
 	db_path = fmt.aprintf("%s/%s", data_dir, DB_FILE_NAME)
-
 	return data_dir, db_path, blob_dir, true
 }
 
