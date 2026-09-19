@@ -5,9 +5,7 @@ import "core:strings"
 
 
 wayland_create :: proc() -> (Clipboard, bool) {
-	return Clipboard{
-		backend = .Wayland,
-	}, true
+	return Clipboard{backend = .Wayland}, true
 }
 
 
@@ -18,7 +16,7 @@ wayland_set_text :: proc(text: string) -> bool {
 		return false
 	}
 
-	desc := os.Process_Desc{
+	desc := os.Process_Desc {
 		command = []string{"wl-copy"},
 		stdin   = read_pipe,
 	}
@@ -70,18 +68,11 @@ wayland_get_text :: proc() -> (string, bool) {
 
 // Get arbitrary MIME type
 wayland_get_mime :: proc(mime: string) -> ([]u8, bool) {
-	desc := os.Process_Desc{
-		command = []string{
-			"wl-paste",
-			"--no-newline",
-			"--type", mime,
-		},
+	desc := os.Process_Desc {
+		command = []string{"wl-paste", "--no-newline", "--type", mime},
 	}
 
-	state, stdout, stderr, err := os.process_exec(
-		desc,
-		context.allocator,
-	)
+	state, stdout, stderr, err := os.process_exec(desc, context.allocator)
 
 	delete(stderr)
 
@@ -106,17 +97,11 @@ wayland_get_mime :: proc(mime: string) -> ([]u8, bool) {
 
 // Available MIME types
 wayland_get_types :: proc() -> ([]string, bool) {
-	desc := os.Process_Desc{
-		command = []string{
-			"wl-paste",
-			"--list-types",
-		},
+	desc := os.Process_Desc {
+		command = []string{"wl-paste", "--list-types"},
 	}
 
-	state, stdout, stderr, err := os.process_exec(
-		desc,
-		context.allocator,
-	)
+	state, stdout, stderr, err := os.process_exec(desc, context.allocator)
 
 	delete(stderr)
 
@@ -190,10 +175,7 @@ wayland_get :: proc() -> (Clipboard_Data, bool) {
 		data, ok := wayland_get_mime("text/uri-list")
 
 		if ok {
-			return Clipboard_Data{
-				mime = "text/uri-list",
-				data = data,
-			}, true
+			return Clipboard_Data{mime = "text/uri-list", data = data}, true
 		}
 	}
 
@@ -202,10 +184,7 @@ wayland_get :: proc() -> (Clipboard_Data, bool) {
 		data, ok := wayland_get_mime("text/plain")
 
 		if ok {
-			return Clipboard_Data{
-				mime = "text/plain",
-				data = data,
-			}, true
+			return Clipboard_Data{mime = "text/plain", data = data}, true
 		}
 	}
 
@@ -213,10 +192,7 @@ wayland_get :: proc() -> (Clipboard_Data, bool) {
 		data, ok := wayland_get_mime("text/plain;charset=utf-8")
 
 		if ok {
-			return Clipboard_Data{
-				mime = "text/plain",
-				data = data,
-			}, true
+			return Clipboard_Data{mime = "text/plain", data = data}, true
 		}
 	}
 
@@ -225,10 +201,7 @@ wayland_get :: proc() -> (Clipboard_Data, bool) {
 		data, ok := wayland_get_mime("image/png")
 
 		if ok {
-			return Clipboard_Data{
-				mime = "image/png",
-				data = data,
-			}, true
+			return Clipboard_Data{mime = "image/png", data = data}, true
 		}
 	}
 
@@ -236,10 +209,7 @@ wayland_get :: proc() -> (Clipboard_Data, bool) {
 		data, ok := wayland_get_mime("image/jpeg")
 
 		if ok {
-			return Clipboard_Data{
-				mime = "image/jpeg",
-				data = data,
-			}, true
+			return Clipboard_Data{mime = "image/jpeg", data = data}, true
 		}
 	}
 

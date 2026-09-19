@@ -14,9 +14,7 @@ x11_create :: proc() -> (Clipboard, bool) {
 
 	xlib.CloseDisplay(display)
 
-	return Clipboard{
-		backend = .X11,
-	}, true
+	return Clipboard{backend = .X11}, true
 }
 
 
@@ -27,13 +25,9 @@ x11_set_text :: proc(text: string) -> bool {
 		return false
 	}
 
-	desc := os.Process_Desc{
-		command = []string{
-			"xclip",
-			"-selection",
-			"clipboard",
-		},
-		stdin = read_pipe,
+	desc := os.Process_Desc {
+		command = []string{"xclip", "-selection", "clipboard"},
+		stdin   = read_pipe,
 	}
 
 	process, start_err := os.process_start(desc)
@@ -71,21 +65,11 @@ x11_set_text :: proc(text: string) -> bool {
 
 
 x11_get_target :: proc(target: string) -> ([]u8, bool) {
-	desc := os.Process_Desc{
-		command = []string{
-			"xclip",
-			"-selection",
-			"clipboard",
-			"-o",
-			"-t",
-			target,
-		},
+	desc := os.Process_Desc {
+		command = []string{"xclip", "-selection", "clipboard", "-o", "-t", target},
 	}
 
-	state, stdout, stderr, err := os.process_exec(
-		desc,
-		context.allocator,
-	)
+	state, stdout, stderr, err := os.process_exec(desc, context.allocator)
 
 	delete(stderr)
 
@@ -133,21 +117,11 @@ x11_get_text :: proc() -> (string, bool) {
 
 
 x11_get_targets :: proc() -> ([]string, bool) {
-	desc := os.Process_Desc{
-		command = []string{
-			"xclip",
-			"-selection",
-			"clipboard",
-			"-o",
-			"-t",
-			"TARGETS",
-		},
+	desc := os.Process_Desc {
+		command = []string{"xclip", "-selection", "clipboard", "-o", "-t", "TARGETS"},
 	}
 
-	state, stdout, stderr, err := os.process_exec(
-		desc,
-		context.allocator,
-	)
+	state, stdout, stderr, err := os.process_exec(desc, context.allocator)
 
 	delete(stderr)
 
@@ -220,10 +194,7 @@ x11_get :: proc() -> (Clipboard_Data, bool) {
 		data, ok := x11_get_target("text/uri-list")
 
 		if ok {
-			return Clipboard_Data{
-				mime = "text/uri-list",
-				data = data,
-			}, true
+			return Clipboard_Data{mime = "text/uri-list", data = data}, true
 		}
 	}
 
@@ -232,10 +203,7 @@ x11_get :: proc() -> (Clipboard_Data, bool) {
 		data, ok := x11_get_target("UTF8_STRING")
 
 		if ok {
-			return Clipboard_Data{
-				mime = "text/plain",
-				data = data,
-			}, true
+			return Clipboard_Data{mime = "text/plain", data = data}, true
 		}
 	}
 
@@ -244,10 +212,7 @@ x11_get :: proc() -> (Clipboard_Data, bool) {
 		data, ok := x11_get_target("text/plain")
 
 		if ok {
-			return Clipboard_Data{
-				mime = "text/plain",
-				data = data,
-			}, true
+			return Clipboard_Data{mime = "text/plain", data = data}, true
 		}
 	}
 
@@ -256,10 +221,7 @@ x11_get :: proc() -> (Clipboard_Data, bool) {
 		data, ok := x11_get_target("STRING")
 
 		if ok {
-			return Clipboard_Data{
-				mime = "text/plain",
-				data = data,
-			}, true
+			return Clipboard_Data{mime = "text/plain", data = data}, true
 		}
 	}
 
@@ -268,10 +230,7 @@ x11_get :: proc() -> (Clipboard_Data, bool) {
 		data, ok := x11_get_target("image/png")
 
 		if ok {
-			return Clipboard_Data{
-				mime = "image/png",
-				data = data,
-			}, true
+			return Clipboard_Data{mime = "image/png", data = data}, true
 		}
 	}
 
@@ -280,10 +239,7 @@ x11_get :: proc() -> (Clipboard_Data, bool) {
 		data, ok := x11_get_target("image/jpeg")
 
 		if ok {
-			return Clipboard_Data{
-				mime = "image/jpeg",
-				data = data,
-			}, true
+			return Clipboard_Data{mime = "image/jpeg", data = data}, true
 		}
 	}
 

@@ -30,29 +30,19 @@ Clipboard_Data :: struct {
 
 
 create :: proc() -> (Clipboard, bool) {
-	_, wayland_found := os.lookup_env_alloc(
-		"WAYLAND_DISPLAY",
-		context.allocator,
-	)
+	_, wayland_found := os.lookup_env_alloc("WAYLAND_DISPLAY", context.allocator)
 
 	if wayland_found {
 		if _, ok := wayland_create(); ok {
-			return Clipboard{
-				backend = .Wayland,
-			}, true
+			return Clipboard{backend = .Wayland}, true
 		}
 	}
 
-	_, x11_found := os.lookup_env_alloc(
-		"DISPLAY",
-		context.allocator,
-	)
+	_, x11_found := os.lookup_env_alloc("DISPLAY", context.allocator)
 
 	if x11_found {
 		if _, ok := x11_create(); ok {
-			return Clipboard{
-				backend = .X11,
-			}, true
+			return Clipboard{backend = .X11}, true
 		}
 	}
 
