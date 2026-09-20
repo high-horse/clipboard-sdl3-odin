@@ -48,6 +48,9 @@ database_init :: proc() -> bool {
 	if !prepare_table(&g_db) {
 		return false
 	}
+	if !set_default_config(&g_db) {
+		return false
+	}
 	g_db.initialized = true
 
 	return true
@@ -166,5 +169,72 @@ set_db_content_with_blob :: proc(content: ^database_content) -> bool {
 	}
 
 	fmt.printfln("Successfully stored blob: %s (%d bytes)", file_path, len(content.data))
+	return true
+}
+
+create_config_table :: proc(db: ^Database) -> bool {
+	query := "CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)"
+	query_cs := strings.clone_to_cstring(query, context.temp_allocator);
+	stmt: ^sql.Statement
+	if sql.prepare_v2(db.db, query_cs, -1, &stmt, nil) != .Ok {
+		fmt.printfln("Failed to prepare statement: %s", sql.errmsg(db.db))
+		return false
+	}
+	defer sql.finalize(stmt)
+
+	if rc := sql.step(stmt); rc != .Done {
+		fmt.printfln("Failed to create config table: %s", sql.errmsg(db.db))
+		return false
+	}
+
+	return true
+}
+
+set_default_config :: proc(db: ^Database) -> bool {
+	if !create_config_table(db) {
+		return false
+	}
+	fmt.printfln("Setting default config")
+	
+	query := "INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)"
+	query_cs := strings.clone_to_cstring(query, context.temp_allocator);
+	stmt: ^sql.Statement
+	if sql.prepare_v2(db.db, query_cs, -1, &stmt, nil) != .Ok {
+		fmt.printfln("Failed to prepare statement: %s", sql.errmsg(db.db))
+		return false
+	}
+	defer sql.finalize(stmt)
+
+	entries_key := "max_entries"
+	entries_key_cs := strings.clone_to_cstring(entries_key, context.temp_allocator);
+	if rc := sql.bind_text(
+		stmt,
+		1,
+		entries_key_cs,
+		c.int(len(entries_key_cs)),
+		sql.Destructor{behaviour = .Static},
+	); rc != .Ok {
+		fmt.printfln("Failed to bind key: %v", rc)
+		return false
+	}
+
+	entries_value := "5"
+	entries_value_cs := strings.clone_to_cstring(entries_value, context.temp_allocator);
+	if rc := sql.bind_text(
+		stmt,
+		2,
+		entries_value_cs,
+		c.int(len(entries_value_cs)),
+		sql.Destructor{behaviour = .Static},
+	); rc != .Ok {
+		fmt.printfln("Failed to bind value: %v", rc)
+		return false
+	}
+
+	if rc := sql.step(stmt); rc != .Done {
+		fmt.printfln("Failed to set default config: %s", sql.errmsg(db.db))
+		return false
+	}
+
 	return true
 }
