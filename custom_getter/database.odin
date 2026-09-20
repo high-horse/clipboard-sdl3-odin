@@ -1,6 +1,7 @@
 package main
 
 import "core:c"
+import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -8,11 +9,17 @@ import "core:strings"
 import sql "sqlite3"
 
 
+Config :: struct {
+	max_entries: int `json:"max_entries"`,
+}
+
 Database :: struct {
 	db:          ^sql.Connection,
 	data_dir:    string,
 	blob_dir:    string,
 	db_path:     string,
+	config_path: string,
+	config:      Config,
 	initialized: bool,
 }
 
@@ -27,7 +34,7 @@ get_db :: proc() -> (^Database, bool) {
 }
 
 database_init :: proc() -> bool {
-	data_dir, db_path, blob_dir, ok := init_storage()
+	data_dir, db_path, blob_dir, config_file_name, ok := init_storage()
 
 	if !ok {
 		return false
@@ -41,6 +48,14 @@ database_init :: proc() -> bool {
 	g_db.blob_dir = blob_dir
 	g_db.db_path = db_path
 
+	// file_path, err := filepath.join({db.blob_dir, content.hash}, context.temp_allocator)
+	config_path, err := filepath.join({g_db.data_dir, config_file_name}, context.temp_allocator)
+	if err != nil {
+		fmt.printfln("Failed to create config path: %s", err)
+		return false
+	}
+	g_db.config_path = strings.clone(config_path, context.allocator)
+
 	if !connect_db() {
 		return false
 	}
@@ -48,9 +63,10 @@ database_init :: proc() -> bool {
 	if !prepare_table(&g_db) {
 		return false
 	}
-	if !set_default_config(&g_db) {
+	if !load_config(&g_db) {
 		return false
 	}
+
 	g_db.initialized = true
 
 	return true
@@ -172,69 +188,61 @@ set_db_content_with_blob :: proc(content: ^database_content) -> bool {
 	return true
 }
 
-create_config_table :: proc(db: ^Database) -> bool {
-	query := "CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)"
-	query_cs := strings.clone_to_cstring(query, context.temp_allocator);
-	stmt: ^sql.Statement
-	if sql.prepare_v2(db.db, query_cs, -1, &stmt, nil) != .Ok {
-		fmt.printfln("Failed to prepare statement: %s", sql.errmsg(db.db))
-		return false
-	}
-	defer sql.finalize(stmt)
 
-	if rc := sql.step(stmt); rc != .Done {
-		fmt.printfln("Failed to create config table: %s", sql.errmsg(db.db))
-		return false
+load_config :: proc(db: ^Database) -> bool {
+	data, err := os.read_entire_file(db.config_path, context.allocator)
+	if err != nil {
+		fmt.printfln("failed to read config file: %v", err)
+		db.config = Config {
+			max_entries = 5,
+		}
+		return save_config(db)
 	}
 
+	unmarshell_err := json.unmarshal(data, &db.config)
+	delete(data)
+	if unmarshell_err != nil {
+		fmt.printfln("Failed to parse config file: %v", unmarshell_err)
+		return false
+	}
+	fmt.println("config loaded")
 	return true
 }
 
-set_default_config :: proc(db: ^Database) -> bool {
-	if !create_config_table(db) {
+save_config :: proc(db: ^Database) -> bool {
+	data, err := json.marshal(
+		db.config,
+		json.Marshal_Options{pretty = true, use_spaces = true, spaces = 4},
+		context.allocator,
+	)
+	if err != nil {
+		fmt.printfln("Failed to serialize config: %v", err)
 		return false
 	}
-	fmt.printfln("Setting default config")
-	
-	query := "INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)"
-	query_cs := strings.clone_to_cstring(query, context.temp_allocator);
-	stmt: ^sql.Statement
-	if sql.prepare_v2(db.db, query_cs, -1, &stmt, nil) != .Ok {
-		fmt.printfln("Failed to prepare statement: %s", sql.errmsg(db.db))
-		return false
-	}
-	defer sql.finalize(stmt)
+	defer delete(data)
 
-	entries_key := "max_entries"
-	entries_key_cs := strings.clone_to_cstring(entries_key, context.temp_allocator);
-	if rc := sql.bind_text(
-		stmt,
-		1,
-		entries_key_cs,
-		c.int(len(entries_key_cs)),
-		sql.Destructor{behaviour = .Static},
-	); rc != .Ok {
-		fmt.printfln("Failed to bind key: %v", rc)
+	if write_err := os.write_entire_file(db.config_path, data); write_err != nil {
+		fmt.printfln("Failed to write config: %s", write_err)
 		return false
 	}
-
-	entries_value := "5"
-	entries_value_cs := strings.clone_to_cstring(entries_value, context.temp_allocator);
-	if rc := sql.bind_text(
-		stmt,
-		2,
-		entries_value_cs,
-		c.int(len(entries_value_cs)),
-		sql.Destructor{behaviour = .Static},
-	); rc != .Ok {
-		fmt.printfln("Failed to bind value: %v", rc)
-		return false
-	}
-
-	if rc := sql.step(stmt); rc != .Done {
-		fmt.printfln("Failed to set default config: %s", sql.errmsg(db.db))
-		return false
-	}
-
 	return true
+}
+
+set_max_entries :: proc(value: int) -> bool {
+	db, ok := get_db()
+	if !ok {
+		return false
+	}
+
+	db.config.max_entries = value
+	return save_config(db)
+} 
+
+get_max_entries :: proc() -> (int, bool) {
+	db, ok := get_db()
+	if !ok {
+		return -1, false
+	}
+
+	return db.config.max_entries, true
 }

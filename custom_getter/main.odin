@@ -15,6 +15,7 @@ APP_NAME :: "SDL3 odin Clipboard Manager"
 APP_ID :: "com.example.odinsdl3clipboardmanager"
 BLOB_DIR_NAME :: "blobs"
 DB_FILE_NAME :: "cd.slm"
+CONFIG_FILE_NAME :: "cfg.jsn"
 APP_DATA_DIR :: "sdl3-clipboard-manager"
 
 
@@ -32,13 +33,13 @@ Worker_Data :: struct {
 	running: ^bool,
 }
 
-init_storage :: proc() -> (data_dir, db_path, blob_dir: string, ok: bool) {
+init_storage :: proc() -> (data_dir, db_path, blob_dir, config_file_name: string, ok: bool) {
 	data_dir = get_data_dir()
 
 	if !os.exists(data_dir) {
 		if err := os.make_directory_all(data_dir); err != nil {
 			fmt.eprintfln("failed to create data dir: %v", err)
-			return "", "", "", false
+			return "", "", "","",  false
 		}
 	}
 
@@ -47,12 +48,12 @@ init_storage :: proc() -> (data_dir, db_path, blob_dir: string, ok: bool) {
 	if !os.exists(blob_dir) {
 		if err := os.make_directory_all(blob_dir); err != nil {
 			fmt.eprintfln("failed to create blob directory: %v", err)
-			return "", "", "", false
+			return "", "", "", "", false
 		}
 	}
 
 	db_path = fmt.aprintf("%s/%s", data_dir, DB_FILE_NAME)
-	return data_dir, db_path, blob_dir, true
+	return data_dir, db_path, blob_dir, CONFIG_FILE_NAME,  true
 }
 
 
