@@ -1,5 +1,6 @@
 package clipboard
 
+import "core:fmt"
 import "core:os"
 import sdl "vendor:sdl3"
 
@@ -11,6 +12,7 @@ Backend :: enum {
 
 Clipboard :: struct {
 	backend: Backend,
+	initiated: bool,
 }
 
 Clipboard_Data :: struct {
@@ -29,13 +31,26 @@ Clipboard_Data :: struct {
 	data: []u8,
 }
 
+g_cb: Clipboard
 
-create :: proc() -> (Clipboard, bool) {
+get_cb :: proc() -> (^Clipboard, bool) {
+	if !g_cb.initiated {
+		fmt.println("Clipboard not initiated")
+		return nil, false
+	}
+	return &g_cb, true
+}
+
+create :: proc() -> bool {
 	_, wayland_found := os.lookup_env_alloc("WAYLAND_DISPLAY", context.allocator)
 
 	if wayland_found {
 		if _, ok := wayland_create(); ok {
-			return Clipboard{backend = .Wayland}, true
+			g_cb = Clipboard{
+				backend = .Wayland, 
+				initiated = true,
+			}
+			return true
 		}
 	}
 
@@ -43,11 +58,15 @@ create :: proc() -> (Clipboard, bool) {
 
 	if x11_found {
 		if _, ok := x11_create(); ok {
-			return Clipboard{backend = .X11}, true
+			g_cb = Clipboard{
+				backend = .X11,
+				initiated = true,
+			}
+			return true
 		}
 	}
 
-	return Clipboard{}, false
+	return false
 }
 
 
@@ -71,7 +90,11 @@ set_text :: proc(cb: ^Clipboard, text: string) -> bool {
 //
 // It does not care whether the clipboard currently contains
 // a file, image, etc.
-get_text :: proc(cb: ^Clipboard) -> (string, bool) {
+get_text :: proc() -> (string, bool) {
+	cb, ok := get_cb()
+	if !ok {
+		return "", false
+	}
 	switch cb.backend {
 	case .Wayland:
 		return wayland_get_text()
@@ -91,7 +114,11 @@ get_text :: proc(cb: ^Clipboard) -> (string, bool) {
 //
 // The returned data is allocated with context.allocator and
 // belongs to the caller.
-get :: proc(cb: ^Clipboard) -> (Clipboard_Data, bool) {
+get :: proc() -> (Clipboard_Data, bool) {
+	cb, ok := get_cb()
+	if !ok {
+		return {}, false
+	}
 	switch cb.backend {
 	case .Wayland:
 		return wayland_get()
@@ -107,8 +134,13 @@ get :: proc(cb: ^Clipboard) -> (Clipboard_Data, bool) {
 }
 
 
-destroy :: proc(cb: ^Clipboard) {
+destroy :: proc() {
+	cb, ok := get_cb()
+	if !ok {
+		return
+	}
 	cb.backend = .None
+	return
 }
 
 
@@ -131,19 +163,23 @@ backend_name :: proc(cb: ^Clipboard) -> string {
 // 	sdl.SetClipboardData()
 // }
 
-// set_content :: proc(cb: ^Clipboard, content: Clipboard_Data) -> bool {
-// 	switch cb.backend {
-// 	case .Wayland:
-// 		return wayland_set_content(content)
+set_content :: proc(content: ^Clipboard_Data) -> bool {
+	cb, ok := get_cb()
+	if !ok {
+		return false
+	}
+	switch cb.backend {
+	case .Wayland:
+		return wayland_set(content)
 
-// 	case .X11:
-// 		return x11_set_content(content)
+	case .X11:
+		return x11_set(content)
 
-// 	case .None:
-// 		return false
-// 	}
+	case .None:
+		return false
+	}
 
-// 	return false
-// }
+	return false
+}
 
 

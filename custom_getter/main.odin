@@ -127,15 +127,28 @@ main :: proc() {
 
 	worker := thread.create_and_start_with_data(data, clipboard_worker_thred)
 
+	ok = clipboard.create()
+	if !ok {
+		fmt.println("Could not initialize clipboard.")
+		return
+	}
+	defer clipboard.destroy()
+	
 	text_to_copy := "sdl.SetClipboardData() is working!"
-    db_content := database_content {
-        data         = transmute([]u8)(text_to_copy), // Use '=' instead of ':'
-        mime         = "text/plain",
-        hash         = "",
-        content_path = "",
+    // db_content := database_content {
+    //     data         = transmute([]u8)(text_to_copy), // Use '=' instead of ':'
+    //     mime         = "text/plain",
+    //     hash         = "",
+    //     content_path = "",
+    // }
+    // fmt.println("setting contne")
+    // set_content(&db_content)
+    cb_content := clipboard.Clipboard_Data{
+    	mime= "text/plain",
+    	data= transmute([]u8)(text_to_copy),
     }
-    fmt.println("setting contne")
-    set_content(&db_content)
+    fmt.printfln("setting content : '%s'", text_to_copy)
+    clipboard.set_content(&cb_content)
 	
 	mainloop(&app, ch)
 	thread.join(worker)

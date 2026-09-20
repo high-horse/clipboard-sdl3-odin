@@ -215,3 +215,47 @@ wayland_get :: proc() -> (Clipboard_Data, bool) {
 
 	return {}, false
 }
+
+
+wayland_set :: proc(item: ^Clipboard_Data) -> bool {
+	read_pipe, write_pipe, err := os.pipe()
+
+	if err != os.ERROR_NONE {
+		return false
+	}
+
+	desc := os.Process_Desc {
+		command = []string{"wl-copy", "--type", item.mime},
+		stdin   = read_pipe,
+	}
+
+	process, start_err := os.process_start(desc)
+
+	_ = os.close(read_pipe)
+
+	if start_err != os.ERROR_NONE {
+		_ = os.close(write_pipe)
+		return false
+	}
+
+	_, write_err := os.write(write_pipe, item.data)
+
+	_ = os.close(write_pipe)
+
+	if write_err != os.ERROR_NONE {
+		_ = os.process_terminate(process)
+
+		_, wait_err := os.process_wait(process)
+		_ = wait_err
+
+		return false
+	}
+
+	state, wait_err := os.process_wait(process)
+
+	if wait_err != os.ERROR_NONE {
+		return false
+	}
+
+	return state.success
+}

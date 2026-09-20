@@ -17,20 +17,18 @@ database_content :: struct {
 }
 
 watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
-	cb, ok := clipboard.create()
+	ok := clipboard.create()
 	if !ok {
 		fmt.println("failed to create clipboard")
 		return
 	}
-	defer clipboard.destroy(&cb)
-
-	fmt.printfln("clipboard backend %s", cb.backend)
+	defer clipboard.destroy()
 
 	last_hash: [32]byte
 	has_last_hash := false
 
 	for wd.running^ {
-		data, ok := clipboard.get(&cb)
+		data, ok := clipboard.get()
 		if ok {
 			defer delete(data.data)
 
@@ -94,21 +92,17 @@ watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 
 
 watch_clipboard :: proc() {
-	cb, ok := clipboard.create()
-
+	ok := clipboard.create()
 	if !ok {
 		fmt.println("Could not initialize clipboard.")
 		return
 	}
 
-	defer clipboard.destroy(&cb)
-
-	fmt.printf("Clipboard backend: %s\n", clipboard.backend_name(&cb))
-
+	defer clipboard.destroy()
 	last_text := ""
 
 	for {
-		text, ok := clipboard.get_text(&cb)
+		text, ok := clipboard.get_text()
 
 		if ok && text != last_text {
 			fmt.printf("Clipboard changed: %s\n", text)
@@ -120,16 +114,14 @@ watch_clipboard :: proc() {
 }
 
 watch_clipboard_get_generic :: proc(wd: ^Worker_Data) {
-	cb, ok := clipboard.create()
-
+	ok := clipboard.create()
 	if !ok {
 		fmt.println("Could not initialize clipboard.")
 		return
 	}
 
-	defer clipboard.destroy(&cb)
+	defer clipboard.destroy()
 
-	fmt.printf("Clipboard backend: %s\n", clipboard.backend_name(&cb))
 
 	last_mime := ""
 	last_data: []u8 = nil
@@ -141,7 +133,7 @@ watch_clipboard_get_generic :: proc(wd: ^Worker_Data) {
 	}
 
 	for wd.running^ {
-		data, ok := clipboard.get(&cb)
+		data, ok := clipboard.get()
 
 		if ok {
 			changed := data.mime != last_mime
