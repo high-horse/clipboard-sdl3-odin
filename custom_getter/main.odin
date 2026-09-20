@@ -5,6 +5,7 @@ import "core:os"
 import "core:sync/chan"
 import "core:thread"
 
+
 import sdl "vendor:sdl3"
 
 import "clipboard"
@@ -20,16 +21,17 @@ APP_DATA_DIR :: "sdl3-clipboard-manager"
 
 
 AppState :: struct {
-	window:        ^sdl.Window,
-	renderer:      ^sdl.Renderer,
-	running:       bool,
-	show_window:   bool,
-	height, width: int,
+	window:          ^sdl.Window,
+	renderer:        ^sdl.Renderer,
+	running:         bool,
+	show_window:     bool,
+	height, width:   int,
+	clipboard_items: [dynamic]database_content,
 }
 
 
 Worker_Data :: struct {
-	ch:      chan.Chan(clipboard.Clipboard_Data),
+	ch:      chan.Chan(database_content),
 	running: ^bool,
 }
 
@@ -39,7 +41,7 @@ init_storage :: proc() -> (data_dir, db_path, blob_dir, config_file_name: string
 	if !os.exists(data_dir) {
 		if err := os.make_directory_all(data_dir); err != nil {
 			fmt.eprintfln("failed to create data dir: %v", err)
-			return "", "", "","",  false
+			return "", "", "", "", false
 		}
 	}
 
@@ -53,7 +55,7 @@ init_storage :: proc() -> (data_dir, db_path, blob_dir, config_file_name: string
 	}
 
 	db_path = fmt.aprintf("%s/%s", data_dir, DB_FILE_NAME)
-	return data_dir, db_path, blob_dir, CONFIG_FILE_NAME,  true
+	return data_dir, db_path, blob_dir, CONFIG_FILE_NAME, true
 }
 
 
@@ -91,10 +93,11 @@ main :: proc() {
 	}
 
 	app := AppState {
-		height      = HEIGHT,
-		width       = WIDTH,
-		show_window = true,
-		running     = true,
+		height          = HEIGHT,
+		width           = WIDTH,
+		show_window     = true,
+		running         = true,
+		clipboard_items = make([dynamic]database_content, 0, context.allocator),
 	}
 
 	app.window = sdl.CreateWindow(
@@ -116,7 +119,7 @@ main :: proc() {
 	}
 	defer sdl.DestroyRenderer(app.renderer)
 
-	ch, err := chan.create_buffered(chan.Chan(clipboard.Clipboard_Data), 16, context.allocator)
+	ch, err := chan.create_buffered(chan.Chan(database_content), 16, context.allocator)
 	assert(err == .None)
 	defer chan.destroy(ch)
 
@@ -124,7 +127,7 @@ main :: proc() {
 	data.ch = ch
 	data.running = &app.running
 	defer free(data)
-	
+
 
 	worker := thread.create_and_start_with_data(data, clipboard_worker_thred)
 
@@ -134,29 +137,29 @@ main :: proc() {
 		return
 	}
 	defer clipboard.destroy()
-	
+
 	text_to_copy := "sdl.SetClipboardData() is working!"
-    // db_content := database_content {
-    //     data         = transmute([]u8)(text_to_copy), // Use '=' instead of ':'
-    //     mime         = "text/plain",
-    //     hash         = "",
-    //     content_path = "",
-    // }
-    // fmt.println("setting contne")
-    // set_content(&db_content)
-    cb_content := clipboard.Clipboard_Data{
-    	mime= "text/plain",
-    	data= transmute([]u8)(text_to_copy),
-    }
-    fmt.printfln("setting content : '%s'", text_to_copy)
-    clipboard.set_content(&cb_content)
-	
+	// db_content := database_content {
+	//     data         = transmute([]u8)(text_to_copy), // Use '=' instead of ':'
+	//     mime         = "text/plain",
+	//     hash         = "",
+	//     content_path = "",
+	// }
+	// fmt.println("setting contne")
+	// set_content(&db_content)
+	cb_content := clipboard.Clipboard_Data {
+		mime = "text/plain",
+		data = transmute([]u8)(text_to_copy),
+	}
+	fmt.printfln("setting content : '%s'", text_to_copy)
+	clipboard.set_content(&cb_content)
+
 	mainloop(&app, ch)
 	thread.join(worker)
 }
 
 
-mainloop :: proc(app: ^AppState, ch: chan.Chan(clipboard.Clipboard_Data)) {
+mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 	for app.running {
 		event: sdl.Event
 
@@ -170,19 +173,27 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(clipboard.Clipboard_Data)) {
 					app.running = false
 				}
 			}
-
 		}
 
 		for {
-			text, ok := chan.try_recv(ch)
+			item, ok := chan.try_recv(ch)
 			if !ok {
 				break
 			}
-			fmt.println("clipboard content changed:", text)
+			append(&app.clipboard_items, item)
+			fmt.printfln("clipboard content changed  from mainloop:: mime=%s, bytes=%d", item.mime, len(item.data))
+			fmt.println("clipboard content changed from mainloop:", cast(string)item.data)
 		}
 		sdl.SetRenderDrawColor(app.renderer, 30, 40, 60, 255)
 		sdl.RenderClear(app.renderer)
 		sdl.RenderPresent(app.renderer)
+	}
+
+	defer {
+		for item in app.clipboard_items {
+			delete(item.data)
+		}
+		delete(app.clipboard_items)
 	}
 }
 

@@ -4,6 +4,7 @@ import "core:crypto/hash"
 import "core:fmt"
 import "core:strings"
 import "core:time"
+import "core:sync/chan"
 
 import "clipboard"
 
@@ -29,59 +30,66 @@ watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 
 	for wd.running^ {
 		data, ok := clipboard.get()
-		if ok {
-			defer delete(data.data)
+		if !ok {
+			continue
+		}
 
-			ctx: hash.Context
-			hash.init(&ctx, .SHA256)
-			hash.update(&ctx, transmute([]u8)data.mime)
-			hash.update(&ctx, data.data)
+		ctx: hash.Context
+		hash.init(&ctx, .SHA256)
+		hash.update(&ctx, transmute([]u8)data.mime)
+		hash.update(&ctx, data.data)
 
-			current_hash: [32]byte
-			hash.final(&ctx, current_hash[:])
+		current_hash: [32]byte
+		hash.final(&ctx, current_hash[:])
 
-			changed := !has_last_hash || (current_hash != last_hash)
-			if changed {
-				last_hash = current_hash
-				has_last_hash = true
+		changed := !has_last_hash || (current_hash != last_hash)
+		if !changed {
+			delete(data.data)
+			continue
+		}
 
-				fmt.printf(
-					"Clipboard changed: mime=%s, size=%d bytes\n",
-					data.mime,
-					len(data.data),
-				)
-				switch data.mime {
-				case "text/plain":
-					text := transmute(string)data.data
-					fmt.printf("Text: %s\n", text)
+		last_hash = current_hash
+		has_last_hash = true
 
-				case "text/uri-list":
-					fmt.printf("Files/URIs:\n%s\n", transmute(string)data.data)
+		fmt.printf(
+			"Clipboard changed: mime=%s, size=%d bytes\n",
+			data.mime,
+			len(data.data),
+		)
+		switch data.mime {
+		case "text/plain":
+			text := transmute(string)data.data
+			fmt.printf("Text: %s\n", text)
 
-				case "image/png":
-					fmt.println("Clipboard contains PNG data.")
+		case "text/uri-list":
+			fmt.printf("Files/URIs:\n%s\n", transmute(string)data.data)
 
-				case "image/jpeg":
-					fmt.println("Clipboard contains JPEG data.")
+		case "image/png":
+			fmt.println("Clipboard contains PNG data.")
 
-				case:
-					fmt.printf("Clipboard contains unsupported MIME type: %s\n", data.mime)
-				}
+		case "image/jpeg":
+			fmt.println("Clipboard contains JPEG data.")
 
-				// hash_str := fmt.aprintf("%x", current_hash[:], allocator = context.temp_allocator)
-				// hash_str, _ := hex.encode(current_hash[:], context.temp_allocator)
-				hash_str := fmt.tprintf("%x", string(current_hash[:]))
-				db_content := database_content {
-					data = data.data,
-					mime = data.mime,
-					hash = hash_str,
-				}
-				if ok := set_db_content_with_blob(&db_content); !ok {
-					fmt.println("Failed to set database content with blob")
-				}
-				
-			}
+		case:
+			fmt.printf("Clipboard contains unsupported MIME type: %s\n", data.mime)
+		}
 
+		hash_str := fmt.tprintf("%x", string(current_hash[:]))
+		db_content := database_content {
+			data = data.data,
+			mime = data.mime,
+			hash = hash_str,
+		}
+		if !set_db_content_with_blob(&db_content){
+			fmt.println("Failed to set database content with blob")
+			delete(data.data)
+			continue
+		}
+
+		if !chan.send(wd.ch, db_content) {
+			fmt.println("failed to send through channel")
+			delete(data.data)
+			break
 		}
 	}
 	if !wd.running^ {
