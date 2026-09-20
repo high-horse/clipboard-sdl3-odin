@@ -1,12 +1,14 @@
 package main
 
+import "core:c"
 import "core:fmt"
 import "core:os"
+import "core:strings"
 import "core:sync/chan"
 import "core:thread"
 
-
 import sdl "vendor:sdl3"
+import ttf "vendor:sdl3/ttf"
 
 import "clipboard"
 
@@ -23,9 +25,12 @@ APP_DATA_DIR :: "sdl3-clipboard-manager"
 AppState :: struct {
 	window:          ^sdl.Window,
 	renderer:        ^sdl.Renderer,
+	font:            ^ttf.Font,
+
 	running:         bool,
 	show_window:     bool,
 	height, width:   int,
+
 	clipboard_items: [dynamic]database_content,
 }
 
@@ -86,6 +91,23 @@ main :: proc() {
 	}
 	defer sdl.Quit()
 
+	if !ttf.Init() {
+		fmt.eprintfln("Failed to initialize SDL_ttf: %s", sdl.GetError())
+		return
+	}
+
+	defer ttf.Quit()
+
+	font := ttf.OpenFont("/usr/share/fonts/liberation/LiberationSans-Regular.ttf", 18)
+
+	if font == nil {
+		fmt.eprintfln("Failed to load font: %s", sdl.GetError())
+		return
+	}
+
+	defer ttf.CloseFont(font)
+
+
 	ok := database_init()
 	if !ok {
 		fmt.eprintfln("failed to init database")
@@ -98,6 +120,7 @@ main :: proc() {
 		show_window     = true,
 		running         = true,
 		clipboard_items = make([dynamic]database_content, 0, context.allocator),
+		font            = font,
 	}
 
 	app.window = sdl.CreateWindow(
@@ -181,11 +204,25 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 				break
 			}
 			append(&app.clipboard_items, item)
-			fmt.printfln("clipboard content changed  from mainloop:: mime=%s, bytes=%d", item.mime, len(item.data))
+			fmt.printfln(
+				"clipboard content changed  from mainloop:: mime=%s, bytes=%d",
+				item.mime,
+				len(item.data),
+			)
 			fmt.println("clipboard content changed from mainloop:", cast(string)item.data)
 		}
 		sdl.SetRenderDrawColor(app.renderer, 30, 40, 60, 255)
 		sdl.RenderClear(app.renderer)
+
+		y := f32(20)
+		count := len(app.clipboard_items)
+		for offset := 0; offset < count; offset += 1 {
+			i := count - 1 - offset
+			item := app.clipboard_items[i]
+			text := clipboard_preview(item)
+			draw_text(app, text, 20, y)
+			y += 30
+		}
 		sdl.RenderPresent(app.renderer)
 	}
 
@@ -194,6 +231,51 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 			delete(item.data)
 		}
 		delete(app.clipboard_items)
+	}
+}
+
+draw_text :: proc(app: ^AppState, text: string, x: f32, y: f32) {
+
+	color := sdl.Color{255, 255, 255, 255}
+	text_cs := strings.clone_to_cstring(text, context.allocator)
+	surface := ttf.RenderText_Blended(app.font, text_cs, c.size_t(len(text_cs)), color)
+	if surface == nil {
+		return
+	}
+
+	defer sdl.DestroySurface(surface)
+	texture := sdl.CreateTextureFromSurface(app.renderer, surface)
+	if texture == nil {
+		return
+	}
+	defer sdl.DestroyTexture(texture)
+
+	rect := sdl.FRect {
+		x = x,
+		y = y,
+		w = f32(surface.w),
+		h = f32(surface.h),
+	}
+	sdl.RenderTexture(app.renderer, texture, nil, &rect)
+
+}
+
+clipboard_preview :: proc(item: database_content) -> string {
+	switch item.mime {
+	case "text/plain":
+		return transmute(string)item.data
+
+	case "text/uri-list":
+		return "[Files / URLs]"
+
+	case "image/png":
+		return "[PNG Image]"
+
+	case "image/jpeg":
+		return "[JPEG Image]"
+
+	case:
+		return fmt.aprintf("[%s]", item.mime)
 	}
 }
 
