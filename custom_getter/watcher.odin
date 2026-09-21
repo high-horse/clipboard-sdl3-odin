@@ -11,6 +11,7 @@ import "clipboard"
 import sdl "vendor:sdl3"
 
 database_content :: struct {
+	generation:   u64,
 	data:         []u8,
 	mime:         string,
 	hash:         string,
@@ -29,6 +30,7 @@ watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 	has_last_hash := false
 
 	for wd.running^ {
+		generation := current_history_generation()
 		data, ok := clipboard.get()
 		if !ok {
 			continue
@@ -76,6 +78,7 @@ watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 
 		hash_str := fmt.tprintf("%x", string(current_hash[:]))
 		db_content := database_content {
+			generation = generation,
 			data = data.data,
 			mime = data.mime,
 			hash = hash_str,

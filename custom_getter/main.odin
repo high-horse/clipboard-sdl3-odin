@@ -1,9 +1,7 @@
 package main
 
-import "core:c"
 import "core:fmt"
 import "core:os"
-import "core:strings"
 import "core:sync/chan"
 import "core:thread"
 
@@ -12,8 +10,8 @@ import ttf "vendor:sdl3/ttf"
 
 import "clipboard"
 
-HEIGHT :: 400
-WIDTH :: 600
+HEIGHT :: 560
+WIDTH :: 680
 APP_NAME :: "SDL3 odin Clipboard Manager"
 APP_ID :: "com.example.odinsdl3clipboardmanager"
 BLOB_DIR_NAME :: "blobs"
@@ -26,12 +24,28 @@ AppState :: struct {
 	window:          ^sdl.Window,
 	renderer:        ^sdl.Renderer,
 	font:            ^ttf.Font,
+	small_font:      ^ttf.Font,
+	title_font:      ^ttf.Font,
+	pointer_cursor:  ^sdl.Cursor,
+	default_cursor:  ^sdl.Cursor,
+	tray:            ^sdl.Tray,
+	instance:        App_Instance,
 
 	running:         bool,
 	show_window:     bool,
 	height, width:   int,
 
 	clipboard_items: [dynamic]database_content,
+	copied_index:    int,
+	copied_until:    u64,
+	scroll:          f32,
+	selected_index:  int,
+	pressed_index:   int,
+	copy_failed:     bool,
+	clear_pressed:   bool,
+	history_generation: u64,
+	history_status:  string,
+	history_status_until: u64,
 }
 
 
@@ -78,6 +92,27 @@ get_data_dir :: proc() -> string {
 }
 
 main :: proc() {
+	background := false
+	for arg in os.args[1:] {
+		if arg == "--background" { background = true }
+	}
+	runtime_dir := os.get_env("XDG_RUNTIME_DIR", context.allocator)
+	defer delete(runtime_dir)
+	if runtime_dir == "" {
+		fmt.eprintln("XDG_RUNTIME_DIR is required; launch from your desktop session.")
+		return
+	}
+	instance_dir := fmt.aprintf("%s/sdl3-clipboard-manager", runtime_dir)
+	defer delete(instance_dir)
+	token := os.get_env("XDG_ACTIVATION_TOKEN", context.allocator)
+	defer delete(token)
+	instance, primary, instance_ok := start_instance(instance_dir, background, token)
+	if !instance_ok {
+		fmt.eprintln("Could not start or activate clipboard manager.")
+		return
+	}
+	if !primary { return }
+	defer close_instance(&instance)
 	if ok := sdl.SetAppMetadataProperty(sdl.PROP_APP_METADATA_IDENTIFIER_STRING, APP_ID); ok {
 		_ = sdl.SetAppMetadataProperty(sdl.PROP_APP_METADATA_NAME_STRING, APP_NAME)
 	} else {
@@ -98,7 +133,7 @@ main :: proc() {
 
 	defer ttf.Quit()
 
-	font := ttf.OpenFont("/usr/share/fonts/liberation/LiberationSans-Regular.ttf", 18)
+	font := ttf.OpenFont("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 18)
 
 	if font == nil {
 		fmt.eprintfln("Failed to load font: %s", sdl.GetError())
@@ -106,6 +141,14 @@ main :: proc() {
 	}
 
 	defer ttf.CloseFont(font)
+	small_font := ttf.OpenFont("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 13)
+	title_font := ttf.OpenFont("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 26)
+	if small_font == nil || title_font == nil {
+		fmt.eprintln("Failed to load UI fonts:", sdl.GetError())
+		return
+	}
+	defer ttf.CloseFont(small_font)
+	defer ttf.CloseFont(title_font)
 
 
 	ok := database_init()
@@ -115,25 +158,34 @@ main :: proc() {
 	}
 
 	app := AppState {
+		instance        = instance,
 		height          = HEIGHT,
 		width           = WIDTH,
 		show_window     = true,
 		running         = true,
 		clipboard_items = make([dynamic]database_content, 0, context.allocator),
 		font            = font,
+		copied_index    = -1,
+		selected_index  = -1,
+		pressed_index   = -1,
+		small_font      = small_font,
+		title_font      = title_font,
 	}
 
+	window_flags := sdl.WindowFlags{.RESIZABLE}
+	if background { window_flags += {.HIDDEN} }
 	app.window = sdl.CreateWindow(
-		"clipboaed",
+		"Clipboard Manager",
 		cast(i32)app.width,
 		cast(i32)app.height,
-		{.RESIZABLE},
+		window_flags,
 	)
 	if app.window == nil {
 		fmt.eprintfln("Failed to init window: %s", sdl.GetError())
 		return
 	}
 	defer sdl.DestroyWindow(app.window)
+	_ = sdl.SetWindowMinimumSize(app.window, 320, 280)
 
 	app.renderer = sdl.CreateRenderer(app.window, nil)
 	if app.renderer == nil {
@@ -141,6 +193,19 @@ main :: proc() {
 		return
 	}
 	defer sdl.DestroyRenderer(app.renderer)
+	app.pointer_cursor = sdl.CreateSystemCursor(.POINTER)
+	app.default_cursor = sdl.CreateSystemCursor(.DEFAULT)
+	defer if app.pointer_cursor != nil { sdl.DestroyCursor(app.pointer_cursor) }
+	defer if app.default_cursor != nil { sdl.DestroyCursor(app.default_cursor) }
+	app.tray = create_app_tray(&app)
+	if background && app.tray != nil {
+		app.show_window = false
+	} else if background {
+		set_window_visible(&app, true)
+	}
+	defer if app.tray != nil {
+		sdl.DestroyTray(app.tray)
+	}
 
 	ch, err := chan.create_buffered(chan.Chan(database_content), 16, context.allocator)
 	assert(err == .None)
@@ -161,21 +226,6 @@ main :: proc() {
 	}
 	defer clipboard.destroy()
 
-	text_to_copy := "sdl.SetClipboardData() is working!"
-	// db_content := database_content {
-	//     data         = transmute([]u8)(text_to_copy), // Use '=' instead of ':'
-	//     mime         = "text/plain",
-	//     hash         = "",
-	//     content_path = "",
-	// }
-	// fmt.println("setting contne")
-	// set_content(&db_content)
-	cb_content := clipboard.Clipboard_Data {
-		mime = "text/plain",
-		data = transmute([]u8)(text_to_copy),
-	}
-	fmt.printfln("setting content : '%s'", text_to_copy)
-	clipboard.set_content(&cb_content)
 
 	mainloop(&app, ch)
 	thread.join(worker)
@@ -184,16 +234,56 @@ main :: proc() {
 
 mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 	for app.running {
+		poll_show_request(app)
 		event: sdl.Event
 
 		for sdl.PollEvent(&event) {
 			#partial switch event.type {
 			case .QUIT:
 				app.running = false
+			case .WINDOW_CLOSE_REQUESTED:
+				if app.tray != nil {
+					set_window_visible(app, false)
+				} else {
+					app.running = false
+				}
 
 			case .KEY_DOWN:
-				if event.key.scancode == .ESCAPE {
-					app.running = false
+				#partial switch event.key.scancode {
+				case .ESCAPE:
+					if app.tray != nil { set_window_visible(app, false) } else { app.running = false }
+				case .DOWN, .UP, .HOME, .END:
+					navigate_items(app, event.key.scancode)
+				case .RETURN, .SPACE:
+					if !event.key.repeat { copy_item(app, app.selected_index) }
+				}
+			case .MOUSE_WHEEL:
+				delta := event.wheel.y
+				if event.wheel.direction == .FLIPPED { delta = -delta }
+				app.scroll -= delta * 44
+				clamp_scroll(app)
+			case .WINDOW_RESIZED:
+				clamp_scroll(app)
+			case .WINDOW_FOCUS_LOST:
+				app.pressed_index = -1
+				app.clear_pressed = false
+			case .MOUSE_BUTTON_DOWN:
+				if app.show_window && event.button.button == sdl.BUTTON_LEFT {
+					app.clear_pressed = clear_button_at(app, event.button.x, event.button.y)
+					app.pressed_index = clipboard_item_at(app, event.button.x, event.button.y)
+				}
+			case .MOUSE_BUTTON_UP:
+				if app.show_window && event.button.button == sdl.BUTTON_LEFT {
+					if app.clear_pressed && clear_button_at(app, event.button.x, event.button.y) {
+						clear_history(app)
+					}
+					app.clear_pressed = false
+					index := clipboard_item_at(app, event.button.x, event.button.y)
+					if index >= 0 && index == app.pressed_index {
+						app.selected_index = index
+						copy_item(app, index)
+					}
+					app.pressed_index = -1
 				}
 			}
 		}
@@ -203,6 +293,11 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 			if !ok {
 				break
 			}
+			if item.generation != app.history_generation {
+				delete(item.data)
+				continue
+			}
+			if app.scroll > 0 { app.scroll += CARD_STEP }
 			append(&app.clipboard_items, item)
 			fmt.printfln(
 				"clipboard content changed  from mainloop:: mime=%s, bytes=%d",
@@ -211,19 +306,13 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 			)
 			fmt.println("clipboard content changed from mainloop:", cast(string)item.data)
 		}
-		sdl.SetRenderDrawColor(app.renderer, 30, 40, 60, 255)
-		sdl.RenderClear(app.renderer)
-
-		y := f32(20)
-		count := len(app.clipboard_items)
-		for offset := 0; offset < count; offset += 1 {
-			i := count - 1 - offset
-			item := app.clipboard_items[i]
-			text := clipboard_preview(item)
-			draw_text(app, text, 20, y)
-			y += 30
+		if !app.show_window {
+			sdl.Delay(30)
+			continue
 		}
+		render_clipboard_ui(app)
 		sdl.RenderPresent(app.renderer)
+		sdl.Delay(16)
 	}
 
 	defer {
@@ -233,52 +322,6 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 		delete(app.clipboard_items)
 	}
 }
-
-draw_text :: proc(app: ^AppState, text: string, x: f32, y: f32) {
-
-	color := sdl.Color{255, 255, 255, 255}
-	text_cs := strings.clone_to_cstring(text, context.allocator)
-	surface := ttf.RenderText_Blended(app.font, text_cs, c.size_t(len(text_cs)), color)
-	if surface == nil {
-		return
-	}
-
-	defer sdl.DestroySurface(surface)
-	texture := sdl.CreateTextureFromSurface(app.renderer, surface)
-	if texture == nil {
-		return
-	}
-	defer sdl.DestroyTexture(texture)
-
-	rect := sdl.FRect {
-		x = x,
-		y = y,
-		w = f32(surface.w),
-		h = f32(surface.h),
-	}
-	sdl.RenderTexture(app.renderer, texture, nil, &rect)
-
-}
-
-clipboard_preview :: proc(item: database_content) -> string {
-	switch item.mime {
-	case "text/plain":
-		return transmute(string)item.data
-
-	case "text/uri-list":
-		return "[Files / URLs]"
-
-	case "image/png":
-		return "[PNG Image]"
-
-	case "image/jpeg":
-		return "[JPEG Image]"
-
-	case:
-		return fmt.aprintf("[%s]", item.mime)
-	}
-}
-
 
 clipboard_worker_thred :: proc(data: rawptr) {
 	wd := cast(^Worker_Data)data

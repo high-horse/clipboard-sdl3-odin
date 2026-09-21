@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Clipboard Manager
+Comment=Browse and reuse clipboard history
+Exec=/usr/bin/clipboard-manager
+TryExec=/usr/bin/clipboard-manager
+Icon=edit-paste
+Terminal=false
+Categories=Utility;
+StartupNotify=true

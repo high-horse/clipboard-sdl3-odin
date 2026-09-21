@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+entry="$config_dir/com.example.odinsdl3clipboardmanager.desktop"
+case "${1:-enable}" in
+    enable)
+        mkdir -p "$config_dir"
+        cat > "$entry" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Clipboard Manager
+Comment=Monitor clipboard history in the background
+Exec=/usr/bin/clipboard-manager --background
+TryExec=/usr/bin/clipboard-manager
+Icon=edit-paste
+Terminal=false
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+DESKTOP
+        echo 'Clipboard Manager will start at login.'
+        ;;
+    disable)
+        if [ -f "$entry" ]; then
+            # A disabled per-user entry also overrides any system autostart entry.
+            cat > "$entry" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Clipboard Manager
+Hidden=true
+DESKTOP
+        fi
+        echo 'Clipboard Manager automatic startup disabled.'
+        ;;
+    *) echo 'Usage: clipboard-manager-autostart [enable|disable]' >&2; exit 2 ;;
+esac

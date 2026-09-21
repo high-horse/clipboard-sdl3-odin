@@ -6,6 +6,7 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core:sync"
 import sql "sqlite3"
 
 
@@ -24,6 +25,51 @@ Database :: struct {
 }
 
 g_db: Database
+history_mutex: sync.Mutex
+history_generation: u64
+
+current_history_generation :: proc() -> u64 {
+	sync.mutex_lock(&history_mutex)
+	defer sync.mutex_unlock(&history_mutex)
+	return history_generation
+}
+
+clear_saved_history :: proc() -> (generation: u64, ok, files_removed: bool) {
+	sync.mutex_lock(&history_mutex)
+	defer sync.mutex_unlock(&history_mutex)
+	generation = history_generation
+	db, ready := get_db()
+	if !ready { return }
+	paths := make([dynamic]string)
+	defer {
+		for path in paths { delete(path) }
+		delete(paths)
+	}
+	stmt: ^sql.Statement
+	if sql.prepare_v2(db.db, "SELECT DISTINCT content_path FROM clipboard_contents", -1, &stmt, nil) != .Ok { return }
+	for {
+		rc := sql.step(stmt)
+		if rc == .Done { break }
+		if rc != .Row { sql.finalize(stmt); return }
+		append(&paths, strings.clone(string(sql.column_text(stmt, 0))))
+	}
+	sql.finalize(stmt)
+	if sql.exec(db.db, "DELETE FROM clipboard_contents", nil, nil, nil) != .Ok { return }
+	history_generation += 1
+	generation = history_generation
+	ok, files_removed = true, true
+	for path in paths {
+		// Only remove files belonging to this application's blob directory.
+		if filepath.dir(path) != db.blob_dir {
+			files_removed = false
+			continue
+		}
+		if os.exists(path) {
+			if err := os.remove(path); err != nil { files_removed = false }
+		}
+	}
+	return
+}
 
 get_db :: proc() -> (^Database, bool) {
 	if !g_db.initialized || g_db.db == nil {
@@ -112,6 +158,9 @@ prepare_table :: proc(db: ^Database) -> bool {
 }
 
 set_db_content_with_blob :: proc(content: ^database_content) -> bool {
+	sync.mutex_lock(&history_mutex)
+	defer sync.mutex_unlock(&history_mutex)
+	if content.generation != history_generation { return false }
 	db, ok := get_db()
 	if !ok {
 		return false
