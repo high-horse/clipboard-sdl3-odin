@@ -3,6 +3,7 @@ package main
 import "core:c"
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:sync/chan"
 import "core:thread"
@@ -98,8 +99,9 @@ main :: proc() {
 
 	defer ttf.Quit()
 
-	font := ttf.OpenFont("/usr/share/fonts/liberation/LiberationSans-Regular.ttf", 18)
-
+	// font := ttf.OpenFont("/usr/share/fonts/liberation/LiberationSans-Regular.ttf", 18)
+	font := ttf.OpenFont("/usr/share/fonts/truetype/freefont/FreeSans.ttf", 18)
+	
 	if font == nil {
 		fmt.eprintfln("Failed to load font: %s", sdl.GetError())
 		return
@@ -113,13 +115,18 @@ main :: proc() {
 		fmt.eprintfln("failed to init database")
 		return
 	}
+	items, db_ok := load_all_contents()
+	if !db_ok {
+		fmt.eprintfln("failed to load clipboard contents")
+		return
+	}
 
 	app := AppState {
 		height          = HEIGHT,
 		width           = WIDTH,
 		show_window     = true,
 		running         = true,
-		clipboard_items = make([dynamic]database_content, 0, context.allocator),
+		clipboard_items = items,
 		font            = font,
 	}
 
@@ -181,6 +188,24 @@ main :: proc() {
 	thread.join(worker)
 }
 
+enforce_max_entries :: proc(app: ^AppState) {
+	max_entries, ok := get_max_entries()
+	if !ok || max_entries <= 0 {
+		return
+	}
+
+	for len(app.clipboard_items) > max_entries {
+		oldest := app.clipboard_items[0]
+
+		ordered_remove(&app.clipboard_items, 0)
+
+		delete(oldest.data)
+		delete(oldest.mime)
+		delete(oldest.hash)
+		delete(oldest.content_path)
+	}
+}
+
 
 mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 	for app.running {
@@ -204,12 +229,22 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 				break
 			}
 			append(&app.clipboard_items, item)
+			enforce_max_entries(app)
 			fmt.printfln(
 				"clipboard content changed  from mainloop:: mime=%s, bytes=%d",
 				item.mime,
 				len(item.data),
 			)
 			fmt.println("clipboard content changed from mainloop:", cast(string)item.data)
+
+			max_entries, has_limit := get_max_entries()
+			if has_limit {
+				for len(app.clipboard_items) > max_entries {
+					oldest := app.clipboard_items[0]
+					ordered_remove(&app.clipboard_items, 0)
+					delete(oldest.data)
+				}
+			}
 		}
 		sdl.SetRenderDrawColor(app.renderer, 30, 40, 60, 255)
 		sdl.RenderClear(app.renderer)
@@ -229,6 +264,9 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 	defer {
 		for item in app.clipboard_items {
 			delete(item.data)
+			delete(item.mime)
+			delete(item.hash)
+			delete(item.content_path)
 		}
 		delete(app.clipboard_items)
 	}
@@ -287,3 +325,4 @@ clipboard_worker_thred :: proc(data: rawptr) {
 	// watch_clipboard_get_generic(wd);
 	fmt.println("worker returned")
 }
+

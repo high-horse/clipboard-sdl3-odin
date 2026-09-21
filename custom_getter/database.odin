@@ -67,6 +67,10 @@ database_init :: proc() -> bool {
 		return false
 	}
 
+	if !trim_dataset(&g_db) {
+		return false
+	}
+
 	g_db.initialized = true
 
 	return true
@@ -111,6 +115,85 @@ prepare_table :: proc(db: ^Database) -> bool {
 	return true
 }
 
+// trim_dataset deletes every entry older than the newest `max_entries`
+// rows, both from the database and from the blob files on disk.
+trim_dataset :: proc(db: ^Database) -> bool {
+	limit := db.config.max_entries
+	if limit <= 0 {
+		return true
+	}
+
+	select_query := `
+		SELECT content_path FROM clipboard_contents
+		WHERE id NOT IN (
+			SELECT id FROM clipboard_contents ORDER BY id DESC LIMIT ?
+		);
+	`
+	select_cs := strings.clone_to_cstring(select_query, context.temp_allocator)
+
+	select_stmt: ^sql.Statement
+	if sql.prepare_v2(db.db, select_cs, -1, &select_stmt, nil) != .Ok {
+		fmt.printfln("Failed to prepare trim select: %s", sql.errmsg(db.db))
+		return false
+	}
+	defer sql.finalize(select_stmt)
+
+	if rc := sql.bind_int(select_stmt, 1, c.int(limit)); rc != .Ok {
+		fmt.printfln("Failed to bind trim limit: %v", rc)
+		return false
+	}
+
+	for {
+		rc := sql.step(select_stmt)
+		if rc == .Done {
+			break
+		}
+		if rc != .Row {
+			fmt.printfln("Failed to step trim select: %v", rc)
+			return false
+		}
+
+		path := string(sql.column_text(select_stmt, 0))
+		if path != "" {
+			if err := os.remove(path); err != nil {
+				fmt.printfln("Failed to remove blob file '%s': %v", path, err)
+			}
+		}
+	}
+
+	delete_query := `
+		DELETE FROM clipboard_contents
+		WHERE id NOT IN (
+			SELECT id FROM clipboard_contents ORDER BY id DESC LIMIT ?
+		);
+	`
+	delete_cs := strings.clone_to_cstring(delete_query, context.temp_allocator)
+
+	delete_stmt: ^sql.Statement
+	if sql.prepare_v2(db.db, delete_cs, -1, &delete_stmt, nil) != .Ok {
+		fmt.printfln("Failed to prepare trim delete: %s", sql.errmsg(db.db))
+		return false
+	}
+	defer sql.finalize(delete_stmt)
+
+	if rc := sql.bind_int(delete_stmt, 1, c.int(limit)); rc != .Ok {
+		fmt.printfln("Failed to bind trim delete limit: %v", rc)
+		return false
+	}
+
+	if rc := sql.step(delete_stmt); rc != .Done {
+		fmt.printfln("Failed to run trim delete: %v", rc)
+		return false
+	}
+
+	changed := sql.changes(db.db)
+	if changed > 0 {
+		fmt.printfln("Trimmed %d entries (max_entries = %d)", changed, limit)
+	}
+
+	return true
+}
+
 set_db_content_with_blob :: proc(content: ^database_content) -> bool {
 	db, ok := get_db()
 	if !ok {
@@ -137,6 +220,34 @@ set_db_content_with_blob :: proc(content: ^database_content) -> bool {
 	file_path_cs := strings.clone_to_cstring(file_path, context.temp_allocator)
 	hash_cs := strings.clone_to_cstring(content.hash, context.temp_allocator)
 	mime_cs := strings.clone_to_cstring(content.mime, context.temp_allocator)
+
+	// Re-selecting an existing item re-stores the same hash; remove any older
+	// row with that hash first so the entry moves ahead instead of duplicating.
+	dedup_query := `DELETE FROM clipboard_contents WHERE hash = ?;`
+	dedup_cs := strings.clone_to_cstring(dedup_query, context.temp_allocator)
+
+	dedup_stmt: ^sql.Statement
+	if sql.prepare_v2(db.db, dedup_cs, -1, &dedup_stmt, nil) != .Ok {
+		fmt.printfln("Failed to prepare dedup statement: %s", sql.errmsg(db.db))
+		return false
+	}
+	defer sql.finalize(dedup_stmt)
+
+	if rc := sql.bind_text(
+		dedup_stmt,
+		1,
+		hash_cs,
+		c.int(len(hash_cs)),
+		sql.Destructor{behaviour = .Static},
+	); rc != .Ok {
+		fmt.printfln("Failed to bind dedup hash: %v", rc)
+		return false
+	}
+
+	if rc := sql.step(dedup_stmt); rc != .Done {
+		fmt.printfln("Failed to dedup old rows: %v", rc)
+		return false
+	}
 
 	stmt: ^sql.Statement
 	// 	prepare_v2 :: proc "c" (db: ^Connection, sql: cstring, n_bytes: c.int, statement: ^^Statement, tail: ^^cstring) -> Result_Code ---
@@ -185,6 +296,9 @@ set_db_content_with_blob :: proc(content: ^database_content) -> bool {
 	}
 
 	fmt.printfln("Successfully stored blob: %s (%d bytes)", file_path, len(content.data))
+
+	trim_dataset(db)
+
 	return true
 }
 
@@ -228,6 +342,69 @@ save_config :: proc(db: ^Database) -> bool {
 	return true
 }
 
+// load_all_contents reads every stored clipboard entry from the database,
+// old-to-new, loading each blob's data from disk. Entries are returned so
+// that the newest item sits at the end of the slice, matching the order the
+// UI renders (newest on top) and the array-trim logic in mainloop.
+load_all_contents :: proc() -> ([dynamic]database_content, bool) {
+	db, ok := get_db()
+	if !ok {
+		return {}, false
+	}
+
+	results := make([dynamic]database_content, 0, 16, context.allocator)
+
+	query := `
+		SELECT content_path, mime, hash FROM clipboard_contents
+		ORDER BY id ASC;
+	`
+	query_cs := strings.clone_to_cstring(query, context.temp_allocator)
+
+	stmt: ^sql.Statement
+	if sql.prepare_v2(db.db, query_cs, -1, &stmt, nil) != .Ok {
+		fmt.printfln("Failed to prepare load query: %s", sql.errmsg(db.db))
+		delete(results)
+		return {}, false
+	}
+	defer sql.finalize(stmt)
+
+	for {
+		rc := sql.step(stmt)
+		if rc == .Done {
+			break
+		}
+		if rc != .Row {
+			fmt.printfln("Failed to step load query: %v", rc)
+			delete(results)
+			return {}, false
+		}
+
+		path := string(sql.column_text(stmt, 0))
+		mime := string(sql.column_text(stmt, 1))
+		hash := string(sql.column_text(stmt, 2))
+
+		if path == "" {
+			continue
+		}
+
+		data, err := os.read_entire_file(path, context.allocator)
+		if err != nil {
+			fmt.printfln("Failed to read blob '%s': %v", path, err)
+			continue
+		}
+
+		item := database_content {
+			data         = data,
+			mime         = strings.clone(mime, context.allocator),
+			hash         = strings.clone(hash, context.allocator),
+			content_path = strings.clone(path, context.allocator),
+		}
+		append(&results, item)
+	}
+
+	return results, true
+}
+
 set_max_entries :: proc(value: int) -> bool {
 	db, ok := get_db()
 	if !ok {
@@ -236,7 +413,7 @@ set_max_entries :: proc(value: int) -> bool {
 
 	db.config.max_entries = value
 	return save_config(db)
-} 
+}
 
 get_max_entries :: proc() -> (int, bool) {
 	db, ok := get_db()
