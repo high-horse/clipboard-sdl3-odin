@@ -6,7 +6,6 @@ import "core:sync/chan"
 import "core:thread"
 
 import sdl "vendor:sdl3"
-import ttf "vendor:sdl3/ttf"
 
 import "clipboard"
 
@@ -21,30 +20,25 @@ APP_DATA_DIR :: "sdl3-clipboard-manager"
 
 
 AppState :: struct {
-	window:          ^sdl.Window,
-	renderer:        ^sdl.Renderer,
-	font:            ^ttf.Font,
-	small_font:      ^ttf.Font,
-	title_font:      ^ttf.Font,
-	pointer_cursor:  ^sdl.Cursor,
-	default_cursor:  ^sdl.Cursor,
-	tray:            ^sdl.Tray,
-	instance:        App_Instance,
-
-	running:         bool,
-	show_window:     bool,
-	height, width:   int,
-
-	clipboard_items: [dynamic]database_content,
-	copied_index:    int,
-	copied_until:    u64,
-	scroll:          f32,
-	selected_index:  int,
-	pressed_index:   int,
-	copy_failed:     bool,
-	clear_pressed:   bool,
-	history_generation: u64,
-	history_status:  string,
+	window:               ^sdl.Window,
+	renderer:             ^sdl.Renderer,
+	pointer_cursor:       ^sdl.Cursor,
+	default_cursor:       ^sdl.Cursor,
+	tray:                 ^sdl.Tray,
+	instance:             App_Instance,
+	running:              bool,
+	show_window:          bool,
+	height, width:        int,
+	clipboard_items:      [dynamic]database_content,
+	copied_index:         int,
+	copied_until:         u64,
+	scroll:               f32,
+	selected_index:       int,
+	pressed_index:        int,
+	copy_failed:          bool,
+	clear_pressed:        bool,
+	history_generation:   u64,
+	history_status:       string,
 	history_status_until: u64,
 }
 
@@ -74,6 +68,7 @@ init_storage :: proc() -> (data_dir, db_path, blob_dir, config_file_name: string
 	}
 
 	db_path = fmt.aprintf("%s/%s", data_dir, DB_FILE_NAME)
+
 	return data_dir, db_path, blob_dir, CONFIG_FILE_NAME, true
 }
 
@@ -121,35 +116,18 @@ main :: proc() {
 	}
 
 	if !sdl.Init({.VIDEO}) {
-		fmt.eprintfln("failed to init sdl : %s", sdl.GetError())
+		fmt.eprintfln("failed to init SDL: %s", sdl.GetError())
 		return
 	}
 	defer sdl.Quit()
 
-	if !ttf.Init() {
-		fmt.eprintfln("Failed to initialize SDL_ttf: %s", sdl.GetError())
+	if !init_fonts() {
+		fmt.eprintln("Failed to initialize fonts")
+		destroy_fonts()
 		return
 	}
 
-	defer ttf.Quit()
-
-	font := ttf.OpenFont("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 18)
-
-	if font == nil {
-		fmt.eprintfln("Failed to load font: %s", sdl.GetError())
-		return
-	}
-
-	defer ttf.CloseFont(font)
-	small_font := ttf.OpenFont("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 13)
-	title_font := ttf.OpenFont("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 26)
-	if small_font == nil || title_font == nil {
-		fmt.eprintln("Failed to load UI fonts:", sdl.GetError())
-		return
-	}
-	defer ttf.CloseFont(small_font)
-	defer ttf.CloseFont(title_font)
-
+	defer destroy_fonts()
 
 	ok := database_init()
 	if !ok {
@@ -164,12 +142,9 @@ main :: proc() {
 		show_window     = true,
 		running         = true,
 		clipboard_items = make([dynamic]database_content, 0, context.allocator),
-		font            = font,
 		copied_index    = -1,
 		selected_index  = -1,
 		pressed_index   = -1,
-		small_font      = small_font,
-		title_font      = title_font,
 	}
 
 	window_flags := sdl.WindowFlags{.RESIZABLE}
@@ -297,10 +272,13 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 				delete(item.data)
 				continue
 			}
-			if app.scroll > 0 { app.scroll += CARD_STEP }
+			if app.scroll > 0 {
+				app.scroll += CARD_STEP
+			}
+
 			append(&app.clipboard_items, item)
 			fmt.printfln(
-				"clipboard content changed  from mainloop:: mime=%s, bytes=%d",
+				"clipboard content changed from mainloop: mime=%s, bytes=%d",
 				item.mime,
 				len(item.data),
 			)

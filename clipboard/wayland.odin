@@ -179,22 +179,39 @@ wayland_get :: proc() -> (Clipboard_Data, bool) {
 		}
 	}
 
-	// Text
-	if wayland_has_type(types, "text/plain") {
-		data, ok := wayland_get_mime("text/plain")
-
-		if ok {
-			return Clipboard_Data{mime = "text/plain", data = data}, true
-		}
-	}
-
+	// Text — prefer explicit UTF-8.
 	if wayland_has_type(types, "text/plain;charset=utf-8") {
 		data, ok := wayland_get_mime("text/plain;charset=utf-8")
 
 		if ok {
-			return Clipboard_Data{mime = "text/plain", data = data}, true
+			return Clipboard_Data{
+				mime = "text/plain;charset=utf-8",
+				data = data,
+			}, true
 		}
 	}
+
+	if wayland_has_type(types, "UTF8_STRING") {
+		data, ok := wayland_get_mime("UTF8_STRING")
+		if ok {
+			return Clipboard_Data{
+				mime = "text/plain",
+				data = data,
+			}, true
+		}
+	}
+
+	if wayland_has_type(types, "text/plain") {
+		data, ok := wayland_get_mime("text/plain")
+
+		if ok {
+			return Clipboard_Data{
+				mime = "text/plain",
+				data = data,
+			}, true
+		}
+	}
+
 
 	// Images
 	if wayland_has_type(types, "image/png") {

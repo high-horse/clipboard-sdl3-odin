@@ -123,3 +123,7 @@ clipboard_layout_test :: proc(t: ^testing.T) {
 	testing.expect(t, app.show_window && !os.exists(instance.request_path), "Activation request shows the window and is consumed")
 	_ = sdl.unsetenv_unsafe("XDG_ACTIVATION_TOKEN")
 }
+
+
+
+text := "Hello नमस्ते مرحبا 繁體中文 😀 😎 ❤️ 🚀 🌍 👍"
