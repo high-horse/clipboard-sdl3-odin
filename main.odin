@@ -270,6 +270,7 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 			}
 			if item.generation != app.history_generation {
 				delete(item.data)
+				delete(item.hash)
 				continue
 			}
 			if app.scroll > 0 {
@@ -282,7 +283,7 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 				item.mime,
 				len(item.data),
 			)
-			fmt.println("clipboard content changed from mainloop:", cast(string)item.data)
+
 		}
 		if !app.show_window {
 			sdl.Delay(30)
@@ -296,6 +297,7 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 	defer {
 		for item in app.clipboard_items {
 			delete(item.data)
+			delete(item.hash)
 		}
 		delete(app.clipboard_items)
 	}

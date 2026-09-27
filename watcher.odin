@@ -19,12 +19,11 @@ database_content :: struct {
 }
 
 watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
-	ok := clipboard.create()
-	if !ok {
-		fmt.println("failed to create clipboard")
-		return
-	}
-	defer clipboard.destroy()
+	// if !clipboard.create() {
+    //     fmt.println("failed to create clipboard")
+    //     return
+    // }
+	// defer clipboard.destroy()
 
 	last_hash: [32]byte
 	has_last_hash := false
@@ -76,7 +75,7 @@ watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 			fmt.printf("Clipboard contains unsupported MIME type: %s\n", data.mime)
 		}
 
-		hash_str := fmt.tprintf("%x", string(current_hash[:]))
+		hash_str := strings.clone(fmt.tprintf("%x", string(current_hash[:])))
 		db_content := database_content {
 			generation = generation,
 			data = data.data,
@@ -92,6 +91,7 @@ watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 		if !chan.send(wd.ch, db_content) {
 			fmt.println("failed to send through channel")
 			delete(data.data)
+			delete(db_content.hash)
 			break
 		}
 	}
