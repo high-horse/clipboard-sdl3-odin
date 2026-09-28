@@ -73,7 +73,7 @@ watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 			fmt.println("Clipboard contains JPEG data.")
 
 		case:
-			fmt.printf("Clipboard contains unsupported MIME type: %s\n", data.mime)
+			fmt.printf("watch_clipboard_get_generic_hashed Clipboard contains unsupported MIME type: %s\n", data.mime)
 		}
 
 		hash_str := strings.clone(fmt.tprintf("%x", string(current_hash[:])))
@@ -189,7 +189,7 @@ watch_clipboard_get_generic :: proc(wd: ^Worker_Data) {
 					fmt.println("Clipboard contains JPEG data.")
 
 				case:
-					fmt.printf("Clipboard contains unsupported MIME type: %s\n", data.mime)
+					fmt.printf("watch_clipboard_get_generic Clipboard contains unsupported MIME type: %s\n", data.mime)
 				}
 
 				// Replace our previous snapshot.

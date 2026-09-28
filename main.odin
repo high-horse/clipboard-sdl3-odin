@@ -42,6 +42,7 @@ AppState :: struct {
 
 	tray:                 ^sdl.Tray,
 	tray_history_menu:    ^sdl.TrayMenu,
+	tray_history_data:    [dynamic]^Tray_Item_Data,
 }
 
 
@@ -181,15 +182,22 @@ main :: proc() {
 	defer if app.pointer_cursor != nil {sdl.DestroyCursor(app.pointer_cursor)}
 	defer if app.default_cursor != nil {sdl.DestroyCursor(app.default_cursor)}
 	app.tray = create_app_tray(&app)
+	if app.tray != nil {
+		update_tray_history(&app)
+	}
+
 	if background && app.tray != nil {
 		app.show_window = false
 	} else if background {
 		set_window_visible(&app, true)
 	}
-	defer if app.tray != nil {
-		sdl.DestroyTray(app.tray)
-	}
+	defer {
+		clear_tray_history_data(&app)
 
+		if app.tray != nil {
+			sdl.DestroyTray(app.tray)
+		}
+	}
 	ch, err := chan.create_buffered(chan.Chan(database_content), 16, context.allocator)
 	assert(err == .None)
 	defer chan.destroy(ch)
@@ -200,7 +208,6 @@ main :: proc() {
 	defer free(data)
 
 
-	worker := thread.create_and_start_with_data(data, clipboard_worker_thred)
 
 	ok = clipboard.create()
 	if !ok {
@@ -208,6 +215,7 @@ main :: proc() {
 		return
 	}
 	defer clipboard.destroy()
+	worker := thread.create_and_start_with_data(data, clipboard_worker_thred)
 
 
 	mainloop(&app, ch)
@@ -285,6 +293,7 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 				move_clipboard_item_to_top(app, item.hash)
 				delete(item.data)
 				delete(item.hash)
+				update_tray_history(app)
 
 				app.scroll = 0
 				app.selected_index = -1
@@ -296,6 +305,8 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 
 			append(&app.clipboard_items, item)
 			enforce_max_entries(app)
+			update_tray_history(app)
+
 			fmt.printfln(
 				"clipboard content changed from mainloop: mime=%s, bytes=%d",
 				item.mime,

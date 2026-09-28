@@ -1,40 +1,19 @@
 package main
 
 import "core:fmt"
+import "core:os"
 import "core:strings"
 
 import sdl3 "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
 
-// ------------------------------------------------------------
-// Fonts
-// ------------------------------------------------------------
-//
-// The application renders everything through `primary`.
-//
-// SDL_ttf checks the primary font first. If a glyph is missing,
-// it searches the fallback fonts added with AddFallbackFont.
-//
-// This means a string such as:
-//
-//     Hello नमस्ते مرحبا 繁體中文
-//
-// can be rendered as one UTF-8 string without manually
-// splitting it into script-specific runs.
-// ------------------------------------------------------------
-
 Font_Set :: struct {
 	primary:    ^ttf.Font,
-
-	// Keep references to fallback fonts so we can close them
-	// during shutdown.
 	arabic:     ^ttf.Font,
 	devanagari: ^ttf.Font,
 	tc:         ^ttf.Font,
 	emoji:      ^ttf.Font,
-
-	// Optional fonts for future UI styles.
 	small:      ^ttf.Font,
 	title:      ^ttf.Font,
 }
@@ -51,6 +30,33 @@ FONT_ARABIC :: "noto_sans_collection/Noto_Sans_Arabic/static/NotoSansArabic-Regu
 FONT_DEVANAGARI :: "noto_sans_collection/Noto_Sans_Devanagari/static/NotoSansDevanagari-Regular.ttf"
 FONT_TC :: "noto_sans_collection/Noto_Sans_TC/static/NotoSansTC-Regular.ttf"
 FONT_EMOJI :: "noto_sans_collection/Noto_Emoji/static/NotoEmoji-Regular.ttf"
+
+
+get_executable_dir :: proc() -> string {
+	exe, err := os.read_link("/proc/self/exe", context.allocator)
+	if err != nil {
+		return ""
+	}
+	defer delete(exe)
+
+	if idx := strings.last_index_byte(exe, '/'); idx >= 0 {
+		return strings.clone(exe[:idx])
+	}
+
+	return "."
+}
+
+
+resource_path :: proc(relative: string) -> string {
+	exe_dir := get_executable_dir()
+
+	if exe_dir == "" {
+		return strings.clone(relative)
+	}
+	defer delete(exe_dir)
+
+	return fmt.aprintf("%s/%s", exe_dir, relative)
+}
 
 
 open_font :: proc(path: string, size: f32) -> ^ttf.Font {
@@ -84,32 +90,47 @@ init_fonts :: proc() -> bool {
 		return false
 	}
 
-    // primary font
-	font_set.primary = open_font(FONT_LATIN, FONT_SIZE)
+	latin_path := resource_path(FONT_LATIN)
+	defer delete(latin_path)
+
+	arabic_path := resource_path(FONT_ARABIC)
+	defer delete(arabic_path)
+
+	devanagari_path := resource_path(FONT_DEVANAGARI)
+	defer delete(devanagari_path)
+
+	tc_path := resource_path(FONT_TC)
+	defer delete(tc_path)
+
+	emoji_path := resource_path(FONT_EMOJI)
+	defer delete(emoji_path)
+
+
+	font_set.primary = open_font(latin_path, FONT_SIZE)
 	if font_set.primary == nil {
 		fmt.eprintln("Failed to load primary Noto Sans font")
 		ttf.Quit()
 		return false
 	}
 
-	font_set.arabic = open_font(FONT_ARABIC, FONT_SIZE)
+	font_set.arabic = open_font(arabic_path, FONT_SIZE)
 	add_fallback(font_set.primary, font_set.arabic, "Noto Sans Arabic")
 
-	font_set.devanagari = open_font(FONT_DEVANAGARI, FONT_SIZE)
+	font_set.devanagari = open_font(devanagari_path, FONT_SIZE)
 	add_fallback(font_set.primary, font_set.devanagari, "Noto Sans Devanagari")
 
 
-	font_set.tc = open_font(FONT_TC, FONT_SIZE)
+	font_set.tc = open_font(tc_path, FONT_SIZE)
 	add_fallback(font_set.primary, font_set.tc, "Noto Sans TC")
 
-	font_set.emoji = open_font(FONT_EMOJI, FONT_SIZE)
+	font_set.emoji = open_font(emoji_path, FONT_SIZE)
 	add_fallback(font_set.primary, font_set.emoji, "Noto Color Emoji")
 
-	font_set.small = open_font(FONT_LATIN, FONT_SMALL)
+	font_set.small = open_font(latin_path, FONT_SMALL)
 	add_fallback(font_set.primary, font_set.small, "Latin small font")
 
 
-	font_set.title= open_font(FONT_LATIN, FONT_BIG)
+	font_set.title = open_font(latin_path, FONT_BIG)
 	add_fallback(font_set.primary, font_set.title, "Latin title font")
 
 	return true
@@ -118,48 +139,40 @@ init_fonts :: proc() -> bool {
 
 destroy_fonts :: proc() {
 
-	// The fallback fonts must remain alive while the primary
-	// font is alive because SDL_ttf's fallback chain references
-	// them.
 	if font_set.arabic != nil {
 		ttf.CloseFont(font_set.arabic)
 		font_set.arabic = nil
 	}
-
 
 	if font_set.devanagari != nil {
 		ttf.CloseFont(font_set.devanagari)
 		font_set.devanagari = nil
 	}
 
-
 	if font_set.tc != nil {
 		ttf.CloseFont(font_set.tc)
 		font_set.tc = nil
 	}
 
-    if font_set.emoji != nil {
-        ttf.CloseFont(font_set.emoji)
-        font_set.emoji = nil
-    }
+	if font_set.emoji != nil {
+		ttf.CloseFont(font_set.emoji)
+		font_set.emoji = nil
+	}
 
 	if font_set.small != nil {
 		ttf.CloseFont(font_set.small)
 		font_set.small = nil
 	}
 
-
 	if font_set.title != nil {
 		ttf.CloseFont(font_set.title)
 		font_set.title = nil
 	}
 
-
 	if font_set.primary != nil {
 		ttf.CloseFont(font_set.primary)
 		font_set.primary = nil
 	}
-
 
 	ttf.Quit()
 }

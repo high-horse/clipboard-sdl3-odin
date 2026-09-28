@@ -102,6 +102,7 @@ clear_history :: proc(app: ^AppState) {
 	if !files_removed {
 		app.history_status = "History cleared; some saved files remain."
 	}
+	update_tray_history(app)
 }
 
 
