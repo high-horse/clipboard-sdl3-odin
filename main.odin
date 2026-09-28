@@ -273,6 +273,15 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 				delete(item.hash)
 				continue
 			}
+			if item.reorder {
+				move_clipboard_item_to_top(app, item.hash)
+				delete(item.data)
+				delete(item.hash)
+
+				app.scroll = 0
+				app.selected_index = -1
+				continue
+			}
 			if app.scroll > 0 {
 				app.scroll += CARD_STEP
 			}

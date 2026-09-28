@@ -274,6 +274,23 @@ ui_text :: proc(app: ^AppState, text: string, x, y: f32, color: sdl.Color) {
 	sdl.RenderTexture(app.renderer, texture, nil, &dst)
 }
 
+ui_text_with_font :: proc(app: ^AppState, font: ^ttf.Font, text: string, x, y: f32, color: sdl.Color) {
+	if font == nil  || len(text) == 0 { return }
+
+	cs := strings.clone_to_cstring(text, context.temp_allocator)
+
+	surface := ttf.RenderText_Blended(font, cs, c.size_t(len(text)), color)
+	if surface == nil { return }
+	defer sdl.DestroySurface(surface)
+
+	texture := sdl.CreateTextureFromSurface(app.renderer, surface)
+	if texture == nil { return }
+	defer sdl.DestroyTexture(texture)
+
+	dst := sdl.FRect{x, y, f32(surface.w), f32(surface.h)}
+	sdl.RenderTexture(app.renderer, texture, nil, &dst)
+}
+
 ui_text_wrapped :: proc(app: ^AppState, text: string, x, y: f32, color: sdl.Color, wrap: i32) {
 	if len(text) == 0 {
 		return
@@ -351,12 +368,13 @@ render_clipboard_ui :: proc(app: ^AppState) {
 	sdl.SetRenderDrawColor(app.renderer, 16, 22, 33, 255)
 
 	sdl.RenderClear(app.renderer)
-	ui_text(app, "Clipboard", layout.x, 18, UI_TEXT)
+	ui_text_with_font(app, font_set.title, "Clipboard",layout.x, 18, UI_TEXT)
 	count_label := fmt.aprintf("%d items", len(app.clipboard_items))
 
 	defer delete(count_label)
 
-	ui_text(app, count_label, layout.x, 57, UI_MUTED)
+	ui_text_with_font(app, font_set.small, count_label, layout.x, 57, UI_MUTED)
+	// ui_text(app, count_label, layout.x, 57, UI_MUTED)
 
 	ui_fill(app, {layout.x, 80, layout.width, 1}, {44, 55, 73, 255})
 
@@ -501,8 +519,8 @@ render_clipboard_ui :: proc(app: ^AppState) {
 		ui_border(app, card, border)
 
 		ui_fill(app, {layout.x, y + 1, 3, CARD_HEIGHT - 2}, border)
-		ui_text(app, item_kind(item.mime), layout.x + 16, y + 11, accent)
 
+		ui_text_with_font(app, font_set.small, item_kind(item.mime), layout.x + 16, y + 11, accent)
 
 		// ----------------------------------------------------
 		// Action
@@ -519,7 +537,7 @@ render_clipboard_ui :: proc(app: ^AppState) {
 			}
 		}
 
-		ui_text(app, action, layout.x + layout.width - 90, y + 11, accent)
+		ui_text_with_font(app, font_set.small, action, layout.x + layout.width - 90, y + 11, accent)
 
 		preview_top := max(f32(LIST_TOP), y + 34)
 
@@ -552,7 +570,8 @@ render_clipboard_ui :: proc(app: ^AppState) {
 
 		defer delete(size_label)
 
-		ui_text(app, size_label, layout.x + 16, y + 88, UI_MUTED)
+		ui_text_with_font(app, font_set.small, size_label, layout.x + 16, y + 88, UI_MUTED)
+		// ui_text(app, size_label, layout.x + 16, y + 88, UI_MUTED)
 	}
 
 	sdl.SetRenderClipRect(app.renderer, nil)
@@ -593,4 +612,33 @@ render_clipboard_ui :: proc(app: ^AppState) {
 	}
 
 	ui_text(app, footer, layout.x, f32(app.height - 25), UI_MUTED)
+}
+
+
+move_clipboard_item_to_top :: proc(app: ^AppState, hash: string) {
+	index := -1
+
+	for item, i in app.clipboard_items {
+		if item.hash == hash {
+			index = i
+			break
+		}
+	}
+
+	if index < 0 {
+		return
+	}
+
+	// Already at the top.
+	if index == len(app.clipboard_items) - 1 {
+		return
+	}
+
+	item := app.clipboard_items[index]
+
+	for i := index; i < len(app.clipboard_items) - 1; i += 1 {
+		app.clipboard_items[i] = app.clipboard_items[i + 1]
+	}
+
+	app.clipboard_items[len(app.clipboard_items) - 1] = item
 }

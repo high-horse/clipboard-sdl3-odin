@@ -16,6 +16,7 @@ database_content :: struct {
 	mime:         string,
 	hash:         string,
 	content_path: string,
+	reorder:      bool,
 }
 
 watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
@@ -76,16 +77,20 @@ watch_clipboard_get_generic_hashed :: proc(wd: ^Worker_Data) {
 		}
 
 		hash_str := strings.clone(fmt.tprintf("%x", string(current_hash[:])))
+		already_exists := database_has_hash(hash_str)
 		db_content := database_content {
 			generation = generation,
 			data = data.data,
 			mime = data.mime,
 			hash = hash_str,
+			reorder = already_exists,
 		}
-		if !set_db_content_with_blob(&db_content){
-			fmt.println("Failed to set database content with blob")
-			delete(data.data)
-			continue
+		if !already_exists {
+			if !set_db_content_with_blob(&db_content){
+				fmt.println("Failed to set database content with blob")
+				delete(data.data)
+				continue
+			}
 		}
 
 		if !chan.send(wd.ch, db_content) {

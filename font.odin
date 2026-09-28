@@ -43,6 +43,8 @@ Font_Set :: struct {
 font_set: Font_Set
 
 FONT_SIZE :: cast(f32)15
+FONT_SMALL :: cast(f32)10
+FONT_BIG :: cast(f32)25
 
 FONT_LATIN :: "noto_sans_collection/Noto_Sans/static/NotoSans-Regular.ttf"
 FONT_ARABIC :: "noto_sans_collection/Noto_Sans_Arabic/static/NotoSansArabic-Regular.ttf"
@@ -102,6 +104,13 @@ init_fonts :: proc() -> bool {
 
 	font_set.emoji = open_font(FONT_EMOJI, FONT_SIZE)
 	add_fallback(font_set.primary, font_set.emoji, "Noto Color Emoji")
+
+	font_set.small = open_font(FONT_LATIN, FONT_SMALL)
+	add_fallback(font_set.primary, font_set.small, "Latin small font")
+
+
+	font_set.title= open_font(FONT_LATIN, FONT_BIG)
+	add_fallback(font_set.primary, font_set.title, "Latin title font")
 
 	return true
 }

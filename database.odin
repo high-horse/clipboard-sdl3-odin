@@ -295,3 +295,32 @@ get_max_entries :: proc() -> (int, bool) {
 
 	return db.config.max_entries, true
 }
+
+
+database_has_hash :: proc(hash: string) -> bool {
+	db, ok := get_db()
+	if !ok {
+		return false
+	}
+
+	query := `
+		SELECT 1
+		FROM clipboard_contents
+		WHERE hash = ?
+		LIMIT 1;
+	`
+	query_cs := strings.clone_to_cstring(query, context.temp_allocator)
+	hash_cs := strings.clone_to_cstring(hash, context.temp_allocator)
+
+	stmt: ^sql.Statement
+
+	if sql.prepare_v2(db.db, query_cs, -1, &stmt, nil) != nil {
+		return false
+	}
+	defer sql.finalize(stmt)
+
+	if sql.bind_text(stmt, 1, hash_cs, c.int(len(hash_cs)), sql.Destructor{behaviour = .Static}) != .Ok {
+		return false
+	}
+	return sql.step(stmt) == .Row
+}
