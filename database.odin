@@ -234,6 +234,8 @@ set_db_content_with_blob :: proc(content: ^database_content) -> bool {
 	}
 
 	fmt.printfln("Successfully stored blob: %s (%d bytes)", file_path, len(content.data))
+
+	trim_dataset(db)
 	return true
 }
 
@@ -275,6 +277,65 @@ save_config :: proc(db: ^Database) -> bool {
 		return false
 	}
 	return true
+}
+
+load_all_contents :: proc() -> ([dynamic]database_content, bool) {
+	db, ok := get_db()
+	if !ok {
+		return {}, false
+	}
+
+	results := make([dynamic]database_content, 0, 16, context.allocator)
+
+	query := `
+		SELECT content_path, mime, hash FROM clipboard_contents
+		ORDER BY id ASC;
+	`
+	query_cs := strings.clone_to_cstring(query, context.temp_allocator)
+
+	stmt: ^sql.Statement
+	if sql.prepare_v2(db.db, query_cs, -1, &stmt, nil) != .Ok {
+		fmt.printfln("Failed to prepare load query: %s", sql.errmsg(db.db))
+		delete(results)
+		return {}, false
+	}
+	defer sql.finalize(stmt)
+
+	for {
+		rc := sql.step(stmt)
+		if rc == .Done {
+			break
+		}
+		if rc != .Row {
+			fmt.printfln("Failed to step load query: %v", rc)
+			delete(results)
+			return {}, false
+		}
+
+		path := string(sql.column_text(stmt, 0))
+		mime := string(sql.column_text(stmt, 1))
+		hash := string(sql.column_text(stmt, 2))
+
+		if path == "" {
+			continue
+		}
+
+		data, err := os.read_entire_file(path, context.allocator)
+		if err != nil {
+			fmt.printfln("Failed to read blob '%s': %v", path, err)
+			continue
+		}
+
+		item := database_content {
+			data         = data,
+			mime         = strings.clone(mime, context.allocator),
+			hash         = strings.clone(hash, context.allocator),
+			content_path = strings.clone(path, context.allocator),
+		}
+		append(&results, item)
+	}
+
+	return results, true
 }
 
 set_max_entries :: proc(value: int) -> bool {
@@ -323,4 +384,82 @@ database_has_hash :: proc(hash: string) -> bool {
 		return false
 	}
 	return sql.step(stmt) == .Row
+}
+
+
+trim_dataset :: proc(db: ^Database) -> bool {
+	limit := db.config.max_entries
+	if limit <= 0 {
+		return true
+	}
+
+	select_query := `
+		SELECT content_path FROM clipboard_contents
+		WHERE id NOT IN (
+			SELECT id FROM clipboard_contents ORDER BY id DESC LIMIT ?
+		);
+	`
+	select_cs := strings.clone_to_cstring(select_query, context.temp_allocator)
+
+	select_stmt: ^sql.Statement
+	if sql.prepare_v2(db.db, select_cs, -1, &select_stmt, nil) != .Ok {
+		fmt.printfln("Failed to prepare trim select: %s", sql.errmsg(db.db))
+		return false
+	}
+	defer sql.finalize(select_stmt)
+
+	if rc := sql.bind_int(select_stmt, 1, c.int(limit)); rc != .Ok {
+		fmt.printfln("Failed to bind trim limit: %v", rc)
+		return false
+	}
+
+	for {
+		rc := sql.step(select_stmt)
+		if rc == .Done {
+			break
+		}
+		if rc != .Row {
+			fmt.printfln("Failed to step trim select: %v", rc)
+			return false
+		}
+
+		path := string(sql.column_text(select_stmt, 0))
+		if path != "" {
+			if err := os.remove(path); err != nil {
+				fmt.printfln("Failed to remove blob file '%s': %v", path, err)
+			}
+		}
+	}
+
+	delete_query := `
+		DELETE FROM clipboard_contents
+		WHERE id NOT IN (
+			SELECT id FROM clipboard_contents ORDER BY updated_at DESC LIMIT ?
+		);
+	`
+	delete_cs := strings.clone_to_cstring(delete_query, context.temp_allocator)
+
+	delete_stmt: ^sql.Statement
+	if sql.prepare_v2(db.db, delete_cs, -1, &delete_stmt, nil) != .Ok {
+		fmt.printfln("Failed to prepare trim delete: %s", sql.errmsg(db.db))
+		return false
+	}
+	defer sql.finalize(delete_stmt)
+
+	if rc := sql.bind_int(delete_stmt, 1, c.int(limit)); rc != .Ok {
+		fmt.printfln("Failed to bind trim delete limit: %v", rc)
+		return false
+	}
+
+	if rc := sql.step(delete_stmt); rc != .Done {
+		fmt.printfln("Failed to run trim delete: %v", rc)
+		return false
+	}
+
+	changed := sql.changes(db.db)
+	if changed > 0 {
+		fmt.printfln("Trimmed %d entries (max_entries = %d)", changed, limit)
+	}
+
+	return true
 }

@@ -134,6 +134,11 @@ main :: proc() {
 		fmt.eprintfln("failed to init database")
 		return
 	}
+	items, db_ok := load_all_contents()
+	if !db_ok {
+		fmt.eprintfln("failed to load clipboard contents")
+		return
+	}
 
 	app := AppState {
 		instance        = instance,
@@ -141,7 +146,8 @@ main :: proc() {
 		width           = WIDTH,
 		show_window     = true,
 		running         = true,
-		clipboard_items = make([dynamic]database_content, 0, context.allocator),
+		// clipboard_items = make([dynamic]database_content, 0, context.allocator),
+		clipboard_items = items,
 		copied_index    = -1,
 		selected_index  = -1,
 		pressed_index   = -1,
@@ -287,6 +293,7 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 			}
 
 			append(&app.clipboard_items, item)
+			enforce_max_entries(app)
 			fmt.printfln(
 				"clipboard content changed from mainloop: mime=%s, bytes=%d",
 				item.mime,
@@ -318,4 +325,21 @@ clipboard_worker_thred :: proc(data: rawptr) {
 	watch_clipboard_get_generic_hashed(wd)
 	// watch_clipboard_get_generic(wd);
 	fmt.println("worker returned")
+}
+
+
+enforce_max_entries :: proc(app: ^AppState) {
+	max_entries, ok := get_max_entries()
+	if !ok || max_entries <= 0 {
+		return
+	}
+
+	for len(app.clipboard_items) > max_entries {
+		oldest := app.clipboard_items[0]
+
+		ordered_remove(&app.clipboard_items, 0)
+
+		delete(oldest.data)
+		delete(oldest.hash)
+	}
 }
