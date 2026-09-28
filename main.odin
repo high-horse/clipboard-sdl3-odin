@@ -24,7 +24,6 @@ AppState :: struct {
 	renderer:             ^sdl.Renderer,
 	pointer_cursor:       ^sdl.Cursor,
 	default_cursor:       ^sdl.Cursor,
-	tray:                 ^sdl.Tray,
 	instance:             App_Instance,
 	running:              bool,
 	show_window:          bool,
@@ -40,6 +39,9 @@ AppState :: struct {
 	history_generation:   u64,
 	history_status:       string,
 	history_status_until: u64,
+
+	tray:                 ^sdl.Tray,
+	tray_history_menu:    ^sdl.TrayMenu,
 }
 
 
@@ -89,7 +91,7 @@ get_data_dir :: proc() -> string {
 main :: proc() {
 	background := false
 	for arg in os.args[1:] {
-		if arg == "--background" { background = true }
+		if arg == "--background" {background = true}
 	}
 	runtime_dir := os.get_env("XDG_RUNTIME_DIR", context.allocator)
 	defer delete(runtime_dir)
@@ -106,7 +108,7 @@ main :: proc() {
 		fmt.eprintln("Could not start or activate clipboard manager.")
 		return
 	}
-	if !primary { return }
+	if !primary {return}
 	defer close_instance(&instance)
 	if ok := sdl.SetAppMetadataProperty(sdl.PROP_APP_METADATA_IDENTIFIER_STRING, APP_ID); ok {
 		_ = sdl.SetAppMetadataProperty(sdl.PROP_APP_METADATA_NAME_STRING, APP_NAME)
@@ -154,7 +156,7 @@ main :: proc() {
 	}
 
 	window_flags := sdl.WindowFlags{.RESIZABLE}
-	if background { window_flags += {.HIDDEN} }
+	if background {window_flags += {.HIDDEN}}
 	app.window = sdl.CreateWindow(
 		"Clipboard Manager",
 		cast(i32)app.width,
@@ -176,8 +178,8 @@ main :: proc() {
 	defer sdl.DestroyRenderer(app.renderer)
 	app.pointer_cursor = sdl.CreateSystemCursor(.POINTER)
 	app.default_cursor = sdl.CreateSystemCursor(.DEFAULT)
-	defer if app.pointer_cursor != nil { sdl.DestroyCursor(app.pointer_cursor) }
-	defer if app.default_cursor != nil { sdl.DestroyCursor(app.default_cursor) }
+	defer if app.pointer_cursor != nil {sdl.DestroyCursor(app.pointer_cursor)}
+	defer if app.default_cursor != nil {sdl.DestroyCursor(app.default_cursor)}
 	app.tray = create_app_tray(&app)
 	if background && app.tray != nil {
 		app.show_window = false
@@ -232,15 +234,15 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 			case .KEY_DOWN:
 				#partial switch event.key.scancode {
 				case .ESCAPE:
-					if app.tray != nil { set_window_visible(app, false) } else { app.running = false }
+					if app.tray != nil {set_window_visible(app, false)} else {app.running = false}
 				case .DOWN, .UP, .HOME, .END:
 					navigate_items(app, event.key.scancode)
 				case .RETURN, .SPACE:
-					if !event.key.repeat { copy_item(app, app.selected_index) }
+					if !event.key.repeat {copy_item(app, app.selected_index)}
 				}
 			case .MOUSE_WHEEL:
 				delta := event.wheel.y
-				if event.wheel.direction == .FLIPPED { delta = -delta }
+				if event.wheel.direction == .FLIPPED {delta = -delta}
 				app.scroll -= delta * 44
 				clamp_scroll(app)
 			case .WINDOW_RESIZED:
