@@ -9,6 +9,10 @@ For system-wide SDL dependencies, see [Installing SDL3 globally on Linux](docs/I
 It covers the major distribution families, SDL3_ttf, verification, and a global
 source-build fallback for releases without suitable packages.
 
+Build into `bin/` with `make build`, or create distro packages with `make package`.
+See [packaging instructions and Makefile targets](packaging/README.md) for DEB,
+RPM, Arch, and tarball builds.
+
 ## Dependencies found in the source
 
 | Dependency | Required for | Evidence / notes |

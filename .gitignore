@@ -1,0 +1,3 @@
+/bin/*
+!/bin/.gitkeep
+__pycache__/
