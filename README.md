@@ -1,9 +1,13 @@
 # Building and running the clipboard manager on Linux
 
 This directory contains an Odin desktop clipboard manager using SDL3. Run the
-commands below from `custom_getter` unless a step says otherwise. Use a terminal
+commands below from the project directory containing `main.odin` unless a step says otherwise. Use a terminal
 inside your logged-in graphical desktop session; run the application as your
 normal user.
+
+For system-wide SDL dependencies, see [Installing SDL3 globally on Linux](docs/INSTALL-SDL3.md).
+It covers the major distribution families, SDL3_ttf, verification, and a global
+source-build fallback for releases without suitable packages.
 
 ## Dependencies found in the source
 
