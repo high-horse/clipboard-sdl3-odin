@@ -4,10 +4,14 @@ import "base:runtime"
 import "core:c"
 import "core:dynlib"
 import "core:strings"
+import "core:fmt"
 import sdl "vendor:sdl3"
 
 TrayEntryFlags :: sdl.TrayEntryFlags
 TrayCallback :: #type proc "c" (userdata: rawptr, entry: ^TrayEntry)
+TraySearchCallback :: #type proc "c" (userdata: rawptr, text: cstring)
+TrayPageCallback :: #type proc "c" (userdata: rawptr, delta: i32)
+TrayOpenCallback :: #type proc "c" (userdata: rawptr)
 Tray :: struct {
     native: rawptr,
     fallback: ^sdl.Tray,
@@ -22,9 +26,18 @@ TrayMenu :: struct {
     fallback: ^sdl.TrayMenu,
     entries: [dynamic]^TrayEntry,
     visible: bool,
+    search: rawptr,
+    search_callback: TraySearchCallback,
+    search_userdata: rawptr,
+    search_activate_requested: bool,
+    pager_previous, pager_next, pager_label: rawptr,
+    page_callback: TrayPageCallback,
+    page_userdata: rawptr,
+    open_callback: TrayOpenCallback,
+    open_userdata: rawptr,
 }
 TrayEntry :: struct {
-    native, button, image_slot, trash: rawptr,
+    native, button, image_slot, trash, label: rawptr,
     fallback: ^sdl.TrayEntry,
     menu: ^TrayMenu,
     callback, delete_callback: TrayCallback,
@@ -50,6 +63,7 @@ Gtk :: struct {
     container_add: proc "c" (rawptr, rawptr),
     container_set_border_width: proc "c" (rawptr, c.uint),
     button_new: proc "c" () -> rawptr,
+    button_new_with_label: proc "c" (cstring) -> rawptr,
     button_set_image: proc "c" (rawptr, rawptr),
     button_set_relief: proc "c" (rawptr, c.int),
     check_button_new_with_label: proc "c" (cstring) -> rawptr,
@@ -57,8 +71,16 @@ Gtk :: struct {
     label_new: proc "c" (cstring) -> rawptr,
     label_set_xalign: proc "c" (rawptr, f32),
     label_set_ellipsize: proc "c" (rawptr, c.int),
+    label_set_text: proc "c" (rawptr, cstring),
+    search_entry_new: proc "c" () -> rawptr,
+    entry_get_text: proc "c" (rawptr) -> cstring,
+    entry_set_placeholder_text: proc "c" (rawptr, cstring),
+    entry_set_max_length: proc "c" (rawptr, c.int),
+    widget_grab_focus: proc "c" (rawptr),
     scrolled_window_new: proc "c" (rawptr, rawptr) -> rawptr,
     scrolled_window_set_policy: proc "c" (rawptr, c.int, c.int),
+    scrolled_window_get_vadjustment: proc "c" (rawptr) -> rawptr,
+    adjustment_set_value: proc "c" (rawptr, f64),
     widget_set_size_request: proc "c" (rawptr, c.int, c.int),
     widget_set_tooltip_text: proc "c" (rawptr, cstring),
     widget_show_all: proc "c" (rawptr),
@@ -135,6 +157,11 @@ CreateTrayMenu :: proc(tray: ^Tray) -> ^TrayMenu {
         menu.popup = gtk.window_new(0)
         menu.native = gtk.box_new(1, 2)
         menu.scroller = gtk.scrolled_window_new(nil, nil)
+        outer := gtk.box_new(1, 6)
+        menu.search = gtk.search_entry_new()
+        gtk.entry_set_placeholder_text(menu.search, "Search clipboard...")
+        gtk.entry_set_max_length(menu.search, 1024)
+        gtk.container_set_border_width(outer, 6)
         gtk.window_set_title(menu.popup, "Clipboard history")
         gtk.window_set_decorated(menu.popup, 0)
         gtk.window_set_resizable(menu.popup, 0)
@@ -145,7 +172,21 @@ CreateTrayMenu :: proc(tray: ^Tray) -> ^TrayMenu {
         gtk.container_set_border_width(menu.native, 6)
         gtk.scrolled_window_set_policy(menu.scroller, 2, 1) // never horizontal / automatic vertical
         gtk.container_add(menu.scroller, menu.native)
-        gtk.container_add(menu.popup, menu.scroller)
+        gtk.box_pack_start(outer, menu.search, 0, 0, 0)
+        gtk.box_pack_start(outer, menu.scroller, 1, 1, 0)
+        pager := gtk.box_new(0, 8)
+        menu.pager_previous = gtk.button_new_with_label("Previous")
+        menu.pager_next = gtk.button_new_with_label("Next")
+        menu.pager_label = gtk.label_new("Page 1 of 1")
+        gtk.box_pack_start(pager, menu.pager_previous, 0, 0, 0)
+        gtk.box_pack_start(pager, menu.pager_label, 1, 1, 0)
+        gtk.box_pack_start(pager, menu.pager_next, 0, 0, 0)
+        gtk.box_pack_start(outer, pager, 0, 0, 0)
+        objects.signal_connect_data(menu.pager_previous, "clicked", rawptr(native_previous_page), menu, nil, 0)
+        objects.signal_connect_data(menu.pager_next, "clicked", rawptr(native_next_page), menu, nil, 0)
+        gtk.container_add(menu.popup, outer)
+        objects.signal_connect_data(menu.search, "changed", rawptr(native_search_changed), menu, nil, 0)
+        objects.signal_connect_data(menu.search, "activate", rawptr(native_search_activate), menu, nil, 0)
         objects.signal_connect_data(menu.popup, "focus-out-event", rawptr(popup_dismiss), menu, nil, 0)
         objects.signal_connect_data(menu.popup, "delete-event", rawptr(popup_dismiss), menu, nil, 0)
         objects.signal_connect_data(menu.popup, "key-press-event", rawptr(popup_key), menu, nil, 0)
@@ -158,6 +199,26 @@ CreateTrayMenu :: proc(tray: ^Tray) -> ^TrayMenu {
 hide_popup :: proc(menu: ^TrayMenu) {
     if menu.popup != nil { gtk.widget_hide(menu.popup) }
     menu.visible = false
+}
+CloseTrayPopup :: hide_popup
+SetTraySearchCallback :: proc(menu: ^TrayMenu, callback: TraySearchCallback, userdata: rawptr) {
+    menu.search_callback, menu.search_userdata = callback, userdata
+}
+native_search_changed :: proc "c" (widget, userdata: rawptr) {
+    context = runtime.default_context()
+    menu := cast(^TrayMenu)userdata
+    if menu.search_callback != nil { menu.search_callback(menu.search_userdata, gtk.entry_get_text(widget)) }
+}
+native_search_activate :: proc "c" (widget, userdata: rawptr) {
+    context = runtime.default_context()
+    menu := cast(^TrayMenu)userdata
+    menu.search_activate_requested = true
+}
+TakeSearchActivate :: proc(menu: ^TrayMenu) -> bool {
+    if menu == nil { return false }
+    requested := menu.search_activate_requested
+    menu.search_activate_requested = false
+    return requested
 }
 popup_dismiss :: proc "c" (widget, event, userdata: rawptr) -> c.int {
     context = runtime.default_context()
@@ -207,6 +268,7 @@ InsertTrayEntryAt :: proc(menu: ^TrayMenu, pos: c.int, label: cstring, flags: Tr
             content := gtk.box_new(0, 8)
             entry.image_slot = gtk.box_new(0, 0)
             text := gtk.label_new(label)
+            entry.label = text
             gtk.label_set_xalign(text, 0)
             gtk.label_set_ellipsize(text, 3) // PANGO_ELLIPSIZE_END
             gtk.box_pack_start(content, entry.image_slot, 0, 0, 0)
@@ -242,6 +304,10 @@ RemoveTrayEntry :: proc(entry: ^TrayEntry) {
 }
 SetTrayEntryCallback :: proc(entry: ^TrayEntry, callback: TrayCallback, userdata: rawptr) {
     entry.callback, entry.userdata = callback, userdata
+}
+SetTrayEntryLabel :: proc(entry: ^TrayEntry, label: cstring) {
+    if entry.label != nil { gtk.label_set_text(entry.label, label) }
+    else if entry.fallback != nil { sdl.SetTrayEntryLabel(entry.fallback, label) }
 }
 SetTrayEntryInlineDelete :: proc(entry: ^TrayEntry, callback: TrayCallback) {
     entry.delete_callback = callback
@@ -285,10 +351,18 @@ SetTrayEntryImage :: proc(entry: ^TrayEntry, surface: ^sdl.Surface) -> bool {
     return true
 }
 
+SetTrayOpenCallback :: proc(menu: ^TrayMenu, callback: TrayOpenCallback, userdata: rawptr) {
+    menu.open_callback, menu.open_userdata = callback, userdata
+}
+prepare_popup_open :: proc(menu: ^TrayMenu) {
+    if !menu.visible && menu.open_callback != nil { menu.open_callback(menu.open_userdata) }
+}
 show_popup :: proc(tray: ^Tray) {
     menu := tray.menu
     if menu == nil || menu.popup == nil { return }
     if menu.visible { hide_popup(menu); return }
+    prepare_popup_open(menu)
+    gtk.adjustment_set_value(gtk.scrolled_window_get_vadjustment(menu.scroller), 0)
     x, y := tray.popup_x, tray.popup_y
     display := gdk.display_get_default()
     if x <= 0 || y <= 0 {
@@ -316,6 +390,7 @@ show_popup :: proc(tray: ^Tray) {
     gtk.window_move(menu.popup, x, y)
     gtk.widget_show_all(menu.popup)
     gtk.window_present(menu.popup)
+    gtk.widget_grab_focus(menu.search)
     menu.visible = true
 }
 UpdateTrays :: proc() {
@@ -338,4 +413,41 @@ DestroyTray :: proc(tray: ^Tray) {
     }
     if tray.fallback != nil { sdl.DestroyTray(tray.fallback) }
     free(tray)
+}
+
+native_previous_page :: proc "c" (widget, userdata: rawptr) {
+    context = runtime.default_context()
+    menu := cast(^TrayMenu)userdata
+    if menu.page_callback != nil { menu.page_callback(menu.page_userdata, -1) }
+}
+native_next_page :: proc "c" (widget, userdata: rawptr) {
+    context = runtime.default_context()
+    menu := cast(^TrayMenu)userdata
+    if menu.page_callback != nil { menu.page_callback(menu.page_userdata, 1) }
+}
+fallback_previous_page :: proc "c" (userdata: rawptr, entry: ^TrayEntry) {
+    native_previous_page(nil, userdata)
+}
+fallback_next_page :: proc "c" (userdata: rawptr, entry: ^TrayEntry) {
+    native_next_page(nil, userdata)
+}
+SetTrayPagination :: proc(menu: ^TrayMenu, page, pages: int, callback: TrayPageCallback, userdata: rawptr) {
+    menu.page_callback, menu.page_userdata = callback, userdata
+    label := strings.clone_to_cstring(fmt.tprintf("Page %d of %d", page+1, pages), context.temp_allocator)
+    if menu.native != nil {
+        gtk.label_set_text(menu.pager_label, label)
+        gtk.widget_set_sensitive(menu.pager_previous, c.int(page > 0))
+        gtk.widget_set_sensitive(menu.pager_next, c.int(page+1 < pages))
+    } else {
+        // Native SDL menus use menu rows for navigation instead of the GTK footer.
+        previous_flags := TrayEntryFlags{.BUTTON}
+        next_flags := TrayEntryFlags{.BUTTON}
+        if page == 0 { previous_flags += {.DISABLED} }
+        if page+1 >= pages { next_flags += {.DISABLED} }
+        previous := InsertTrayEntryAt(menu, -1, "Previous", previous_flags)
+        InsertTrayEntryAt(menu, -1, label, {.BUTTON, .DISABLED})
+        next := InsertTrayEntryAt(menu, -1, "Next", next_flags)
+        if previous != nil { SetTrayEntryCallback(previous, fallback_previous_page, menu) }
+        if next != nil { SetTrayEntryCallback(next, fallback_next_page, menu) }
+    }
 }

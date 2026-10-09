@@ -57,7 +57,7 @@ Card_Action :: enum { Copy, Pin, Delete }
 
 card_action_rect :: proc(app: ^AppState, index: int, action: Card_Action) -> sdl.FRect {
     layout := list_layout(app)
-    y := f32(LIST_TOP+(len(app.clipboard_items)-1-index)*CARD_STEP)-app.scroll
+    y := f32(LIST_TOP+visible_offset_of(app, index)*CARD_STEP)-app.scroll
     return {layout.x+layout.width-104+f32(int(action))*30, y+5, 26, 26}
 }
 

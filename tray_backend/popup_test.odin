@@ -3,7 +3,26 @@ package tray_backend
 import "core:dynlib"
 import "core:testing"
 
-Popup_Callback_Counts :: struct { copies, deletions: int }
+Popup_Callback_Counts :: struct { copies, deletions, opens: int }
+popup_test_open :: proc "c" (userdata: rawptr) {
+    counts := cast(^Popup_Callback_Counts)userdata
+    counts.opens += 1
+}
+
+@(test)
+popup_prepares_each_new_open :: proc(t: ^testing.T) {
+    counts: Popup_Callback_Counts
+    menu: TrayMenu
+    SetTrayOpenCallback(&menu, popup_test_open, &counts)
+    prepare_popup_open(&menu)
+    testing.expect(t, counts.opens == 1)
+    menu.visible = true
+    prepare_popup_open(&menu)
+    testing.expect(t, counts.opens == 1)
+    hide_popup(&menu)
+    prepare_popup_open(&menu)
+    testing.expect(t, counts.opens == 2)
+}
 popup_test_copy :: proc "c" (userdata: rawptr, entry: ^TrayEntry) {
     counts := cast(^Popup_Callback_Counts)userdata
     counts.copies += 1

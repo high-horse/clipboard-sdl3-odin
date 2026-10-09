@@ -46,8 +46,15 @@ AppState :: struct {
 
 	tray:                 ^tray_api.Tray,
 	tray_history_menu:    ^tray_api.TrayMenu,
+	tray_visibility_entry: ^tray_api.TrayEntry,
 	tray_history_data:    [dynamic]^Tray_Item_Data,
 	tray_delete_hash:     string,
+	search_query:         string,
+	search_indices:       [dynamic]int,
+	search_focused, search_select_all: bool,
+	tray_search_query:    string,
+	tray_search_dirty:    bool,
+	tray_page, tray_page_delta: int,
 }
 
 
@@ -183,6 +190,12 @@ main :: proc() {
 	}
 	defer sdl.DestroyRenderer(app.renderer)
 	defer clear_image_previews(&app)
+	defer {
+		delete(app.search_query)
+		delete(app.search_indices)
+		delete(app.tray_search_query)
+	}
+	focus_window_search(&app, !background)
 	app.pointer_cursor = sdl.CreateSystemCursor(.POINTER)
 	app.default_cursor = sdl.CreateSystemCursor(.DEFAULT)
 	defer if app.pointer_cursor != nil {sdl.DestroyCursor(app.pointer_cursor)}
@@ -194,7 +207,7 @@ main :: proc() {
 	}
 
 	if background && app.tray != nil {
-		app.show_window = false
+		set_window_visible(&app, false)
 	} else if background {
 		set_window_visible(&app, true)
 	}
@@ -245,6 +258,15 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 				close_main_window(app)
 
 			case .KEY_DOWN:
+				ctrl := .LCTRL in event.key.mod || .RCTRL in event.key.mod
+				if ctrl && event.key.scancode == .F {
+					focus_window_search(app, true)
+					app.search_select_all = true
+					continue
+				}
+				if app.search_focused {
+					if handle_search_key(app, event.key.scancode, ctrl) { continue }
+				}
 				#partial switch event.key.scancode {
 				case .ESCAPE:
 					close_main_window(app)
@@ -255,8 +277,10 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 				case .DELETE:
 					if !event.key.repeat {delete_item(app, app.selected_index)}
 				case .P:
-					if !event.key.repeat {toggle_pin(app, app.selected_index)}
+					if !app.search_focused && !event.key.repeat {toggle_pin(app, app.selected_index)}
 				}
+			case .TEXT_INPUT:
+				if app.search_focused { append_window_search(app, string(event.text.text)) }
 			case .MOUSE_WHEEL:
 				delta := event.wheel.y
 				if event.wheel.direction == .FLIPPED {delta = -delta}
@@ -271,6 +295,8 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 				app.clear_pressed = false
 			case .MOUSE_BUTTON_DOWN:
 				if app.show_window && event.button.button == sdl.BUTTON_LEFT {
+					focus_window_search(app, window_search_at(app, event.button.x, event.button.y))
+					if window_search_clear_at(app, event.button.x, event.button.y) { set_window_search(app, "") }
 					app.clear_pressed = clear_button_at(app, event.button.x, event.button.y)
 					app.pressed_index = clipboard_item_at(app, event.button.x, event.button.y)
 					app.pressed_action = card_action_at(app, event.button.x, event.button.y)
@@ -298,6 +324,13 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 		}
 
 		process_tray_delete(app)
+		if app.tray_search_dirty || app.tray_page_delta != 0 {
+			app.tray_page += app.tray_page_delta
+			app.tray_page_delta = 0
+			app.tray_search_dirty = false
+			update_tray_history(app)
+		}
+		if tray_api.TakeSearchActivate(app.tray_history_menu) { copy_first_tray_match(app) }
 		for {
 			item, ok := chan.try_recv(ch)
 			if !ok {

@@ -6,7 +6,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
-LIST_TOP :: 96
+LIST_TOP :: 126
 LIST_BOTTOM :: 38
 CARD_HEIGHT :: 112
 CARD_STEP :: 124
@@ -36,7 +36,7 @@ list_layout :: proc(app: ^AppState) -> List_Layout {
 	width := min(f32(w) - margin * 2 - sidebar - gap, 880)
 	viewport := max(f32(0), f32(h) - LIST_TOP - LIST_BOTTOM)
 
-	content := max(0, len(app.clipboard_items) * CARD_STEP - (CARD_STEP - CARD_HEIGHT))
+	content := max(0, visible_item_count(app) * CARD_STEP - (CARD_STEP - CARD_HEIGHT))
 
 	return {
 		(f32(w) - width - sidebar - gap) / 2,
@@ -92,6 +92,7 @@ clear_history :: proc(app: ^AppState) {
 	}
 
 	clear(&app.clipboard_items)
+	app.tray_page = 0
 
 	app.scroll = 0
 
@@ -119,7 +120,7 @@ clipboard_item_at :: proc(app: ^AppState, x, y: f32) -> int {
 	position := y - LIST_TOP + app.scroll
 	offset := int(position / CARD_STEP)
 
-	if offset >= len(app.clipboard_items) {
+	if offset >= visible_item_count(app) {
 		return -1
 	}
 
@@ -127,7 +128,7 @@ clipboard_item_at :: proc(app: ^AppState, x, y: f32) -> int {
 		return -1
 	}
 
-	return len(app.clipboard_items) - 1 - offset
+	return visible_item_index(app, offset)
 }
 
 
@@ -148,6 +149,7 @@ delete_item :: proc(app: ^AppState, index: int) {
 	app.selected_index = min(index, len(app.clipboard_items)-1)
 	app.pressed_index, app.copied_index = -1, -1
 	app.copied_until = 0
+	refresh_search_results(app)
 	clamp_scroll(app)
 	update_tray_history(app)
 	app.history_status = "Item deleted."
@@ -168,52 +170,20 @@ copy_item :: proc(app: ^AppState, index: int) {
 
 
 navigate_items :: proc(app: ^AppState, key: sdl.Scancode) {
-	count := len(app.clipboard_items)
-
-	if count == 0 {
-		return
-	}
-
-	index := app.selected_index
-
+	count := visible_item_count(app)
+	if count == 0 { return }
+	offset := visible_offset_of(app, app.selected_index)
 	#partial switch key {
-
-	case .HOME:
-		index = count - 1
-
-	case .END:
-		index = 0
-
-	case .DOWN:
-		if index < 0 {
-			index = count - 1
-		} else {
-			index = max(0, index - 1)
-		}
-
-	case .UP:
-		if index < 0 {
-			index = count - 1
-		} else {
-			index = min(count - 1, index + 1)
-		}
+	case .HOME: offset = 0
+	case .END: offset = count-1
+	case .DOWN: offset = min(count-1, offset+1)
+	case .UP: offset = max(0, offset-1)
 	}
-
-	app.selected_index = index
-
+	app.selected_index = visible_item_index(app, offset)
 	layout := list_layout(app)
-
-	top := f32((count - 1 - index) * CARD_STEP)
-
-	if top < app.scroll {
-		app.scroll = top
-	}
-
-	if top + CARD_HEIGHT > app.scroll + layout.viewport {
-
-		app.scroll = top + CARD_HEIGHT - layout.viewport
-	}
-
+	top := f32(offset*CARD_STEP)
+	if top < app.scroll { app.scroll = top }
+	if top+CARD_HEIGHT > app.scroll+layout.viewport { app.scroll = top+CARD_HEIGHT-layout.viewport }
 	clamp_scroll(app)
 }
 
@@ -420,13 +390,17 @@ render_clipboard_ui :: proc(app: ^AppState) {
 	sdl.RenderClear(app.renderer)
 	ui_text_with_font(app, font_set.title, "Clipboard",layout.x, 18, UI_TEXT)
 	count_label := fmt.aprintf("%d items", len(app.clipboard_items))
+	if app.search_query != "" {
+		delete(count_label)
+		count_label = fmt.aprintf("%d of %d items", visible_item_count(app), len(app.clipboard_items))
+	}
 
 	defer delete(count_label)
 
 	ui_text_with_font(app, font_set.small, count_label, layout.x, 57, UI_MUTED)
 	// ui_text(app, count_label, layout.x, 57, UI_MUTED)
 
-	ui_fill(app, {layout.x, 80, layout.width, 1}, {44, 55, 73, 255})
+	render_window_search(app)
 
 	mouse_x, mouse_y: f32
 
@@ -484,14 +458,16 @@ render_clipboard_ui :: proc(app: ^AppState) {
 	sdl.SetRenderClipRect(app.renderer, &viewport)
 
 
-	count := len(app.clipboard_items)
+	count := visible_item_count(app)
 	if count == 0 {
 
-		ui_text(app, "Nothing copied yet", layout.x + 18, LIST_TOP + 32, UI_TEXT)
+		empty_label := "Nothing copied yet"
+		if app.search_query != "" { empty_label = "No matching items" }
+		ui_text(app, empty_label, layout.x + 18, LIST_TOP + 32, UI_TEXT)
 
 		ui_text_wrapped(
 			app,
-			"Copy text, a link or an image to get started.",
+			empty_hint(app),
 			layout.x + 18,
 			LIST_TOP + 64,
 			UI_MUTED,
@@ -514,7 +490,7 @@ render_clipboard_ui :: proc(app: ^AppState) {
 			break
 		}
 
-		index := count - 1 - offset
+		index := visible_item_index(app, offset)
 
 		item := app.clipboard_items[index]
 

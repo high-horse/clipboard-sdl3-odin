@@ -17,7 +17,7 @@ Resource_Usage :: struct {
 }
 
 resource_sidebar_width :: proc(app: ^AppState) -> f32 {
-    if app.width < 640 || app.height < 440 { return 0 }
+    if app.width < 640 || app.height < 500 { return 0 }
     return 180
 }
 

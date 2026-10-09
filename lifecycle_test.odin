@@ -22,10 +22,28 @@ window_close_hides_until_tray_quit :: proc(t: ^testing.T) {
     close_main_window(&app)
     testing.expect(t, app.running && !app.show_window)
     testing.expect(t, .HIDDEN in sdl.GetWindowFlags(window))
-    set_window_visible(&app, true)
+    tray_toggle_window(&app, nil)
     testing.expect(t, app.running && app.show_window)
+    testing.expect(t, string(tray_visibility_label(&app)) == "Hide window")
+    tray_toggle_window(&app, nil)
+    testing.expect(t, app.running && !app.show_window)
+    testing.expect(t, string(tray_visibility_label(&app)) == "Show Clipboard Manager")
     tray_quit(&app, nil)
     testing.expect(t, !app.running)
+
+    // Filtering must map card and icon hit targets to the original saved item.
+    app.clipboard_items = make([dynamic]database_content)
+    defer delete(app.clipboard_items)
+    defer delete(app.search_query)
+    defer delete(app.search_indices)
+    append(&app.clipboard_items, database_content{mime = "image/png"}, database_content{mime = "text/plain"}, database_content{mime = "image/jpeg"})
+    set_window_search(&app, "png")
+    layout := list_layout(&app)
+    testing.expect(t, clipboard_item_at(&app, layout.x+10, LIST_TOP+10) == 0)
+    trash := card_action_rect(&app, 0, .Delete)
+    testing.expect(t, card_action_at(&app, trash.x+5, trash.y+5) == .Delete)
+    set_window_search(&app, "no match")
+    testing.expect(t, clipboard_item_at(&app, layout.x+10, LIST_TOP+10) == -1)
 
     // Keep a usable exit path on desktops where no tray can be created.
     app.tray = nil

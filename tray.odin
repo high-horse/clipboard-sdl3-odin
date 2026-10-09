@@ -8,8 +8,8 @@ import "core:strings"
 import sdl "vendor:sdl3"
 import tray_api "tray_backend"
 
-TRAY_HISTORY_LIMIT :: 30
-FIXED_TRAY_ENTRIES :: 5 // Show, Hide, Quit, Start at Login, Separator
+TRAY_PAGE_SIZE :: 10
+FIXED_TRAY_ENTRIES :: 4 // Show/Hide, Quit, Start at Login, Separator
 
 Tray_Item_Data :: struct {
 	app:   ^AppState,
@@ -36,21 +36,31 @@ set_window_visible :: proc(app: ^AppState, visible: bool) {
 	if visible {
 		if sdl.ShowWindow(app.window) {
 			app.show_window = true
+			focus_window_search(app, true)
 			_ = sdl.RaiseWindow(app.window)
 		}
 	} else if sdl.HideWindow(app.window) {
 		app.show_window = false
+		focus_window_search(app, false)
+	}
+	update_tray_visibility(app)
+}
+
+tray_visibility_label :: proc(app: ^AppState) -> cstring {
+	if app.show_window { return "Hide window" }
+	return "Show Clipboard Manager"
+}
+
+update_tray_visibility :: proc(app: ^AppState) {
+	if app.tray_visibility_entry != nil {
+		tray_api.SetTrayEntryLabel(app.tray_visibility_entry, tray_visibility_label(app))
 	}
 }
 
-tray_show :: proc "c" (userdata: rawptr, entry: ^tray_api.TrayEntry) {
+tray_toggle_window :: proc "c" (userdata: rawptr, entry: ^tray_api.TrayEntry) {
 	context = runtime.default_context()
-	set_window_visible(cast(^AppState)userdata, true)
-}
-
-tray_hide :: proc "c" (userdata: rawptr, entry: ^tray_api.TrayEntry) {
-	context = runtime.default_context()
-	set_window_visible(cast(^AppState)userdata, false)
+	app := cast(^AppState)userdata
+	set_window_visible(app, !app.show_window)
 }
 
 tray_quit :: proc "c" (userdata: rawptr, entry: ^tray_api.TrayEntry) {
@@ -204,10 +214,11 @@ create_app_tray :: proc(app: ^AppState) -> ^tray_api.Tray {
 		return nil
 	}
 	app.tray_history_menu = menu
+	tray_api.SetTraySearchCallback(menu, tray_search_changed, app)
+	tray_api.SetTrayOpenCallback(menu, tray_popup_opened, app)
 
 	// These entries must match FIXED_TRAY_ENTRIES and stay first.
-	show := tray_api.InsertTrayEntryAt(menu, -1, "Show Clipboard Manager", {.BUTTON})
-	hide := tray_api.InsertTrayEntryAt(menu, -1, "Hide window", {.BUTTON})
+	visibility := tray_api.InsertTrayEntryAt(menu, -1, tray_visibility_label(app), {.BUTTON})
 
 	quit := tray_api.InsertTrayEntryAt(menu, -1, "Quit", {.BUTTON})
 	autostart := tray_api.InsertTrayEntryAt(menu, -1, "Start at Login", {.CHECKBOX})
@@ -220,13 +231,13 @@ create_app_tray :: proc(app: ^AppState) -> ^tray_api.Tray {
 	)
 
 
-	if show == nil || hide == nil || quit == nil || autostart == nil || separator == nil {
+	if visibility == nil || quit == nil || autostart == nil || separator == nil {
 		tray_api.DestroyTray(tray)
 		return nil
 	}
 
-	tray_api.SetTrayEntryCallback(show, tray_show, app)
-	tray_api.SetTrayEntryCallback(hide, tray_hide, app)
+	app.tray_visibility_entry = visibility
+	tray_api.SetTrayEntryCallback(visibility, tray_toggle_window, app)
 	tray_api.SetTrayEntryCallback(quit, tray_quit, app)
 	tray_api.SetTrayEntryCallback(autostart, tray_toggle_autostart, app)
 	tray_api.SetTrayEntryChecked(autostart, autostart_enabled())
@@ -318,7 +329,29 @@ truncate_utf8 :: proc(s: string, max_bytes: int) -> string {
 	return s[:n]
 }
 
+tray_popup_opened :: proc "c" (userdata: rawptr) {
+	context = runtime.default_context()
+	app := cast(^AppState)userdata
+	app.tray_page, app.tray_page_delta = 0, 0
+	update_tray_history(app)
+}
+
+tray_page_bounds :: proc(app: ^AppState, count: int) -> (start, end, pages: int) {
+	pages = max(1, (count+TRAY_PAGE_SIZE-1)/TRAY_PAGE_SIZE)
+	app.tray_page = clamp(app.tray_page, 0, pages-1)
+	start = app.tray_page*TRAY_PAGE_SIZE
+	end = min(count, start+TRAY_PAGE_SIZE)
+	return
+}
+
+tray_change_page :: proc "c" (userdata: rawptr, delta: i32) {
+	context = runtime.default_context()
+	app := cast(^AppState)userdata
+	app.tray_page_delta += int(delta)
+}
+
 update_tray_history :: proc(app: ^AppState) {
+	if app != nil { refresh_search_results(app) }
 	if app == nil || app.tray_history_menu == nil {
 		return
 	}
@@ -327,20 +360,27 @@ update_tray_history :: proc(app: ^AppState) {
 	clear_tray_history_menu(app.tray_history_menu)
 	clear_tray_history_data(app)
 
-	count := min(len(app.clipboard_items), TRAY_HISTORY_LIMIT)
+	matches := make([dynamic]int)
+	defer delete(matches)
+	collect_search_matches(app.clipboard_items[:], app.tray_search_query, &matches)
+	count := len(matches)
+	start, end, pages := tray_page_bounds(app, count)
 
 	if count == 0 {
+		empty_label: cstring = "No clipboard history"
+		if app.tray_search_query != "" { empty_label = "No matching items" }
 		_ = tray_api.InsertTrayEntryAt(
 			app.tray_history_menu,
 			-1,
-			"No clipboard history",
+			empty_label,
 			{.BUTTON, .DISABLED},
 		)
+		tray_api.SetTrayPagination(app.tray_history_menu, app.tray_page, pages, tray_change_page, app)
 		return
 	}
 
-	for offset := 0; offset < count; offset += 1 {
-		index := len(app.clipboard_items) - 1 - offset
+	for offset := start; offset < end; offset += 1 {
+		index := matches[offset]
 		item := app.clipboard_items[index]
 
 		preview := preview_text(item)
@@ -377,4 +417,5 @@ update_tray_history :: proc(app: ^AppState) {
 		tray_api.SetTrayEntryCallback(entry, tray_history_click, data)
 		tray_api.SetTrayEntryInlineDelete(entry, tray_history_delete)
 	}
+	tray_api.SetTrayPagination(app.tray_history_menu, app.tray_page, pages, tray_change_page, app)
 }
