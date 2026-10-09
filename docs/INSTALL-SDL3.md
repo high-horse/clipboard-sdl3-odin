@@ -5,10 +5,10 @@ libraries and development files. Odin supplies bindings, not these native
 libraries. SDL2 and SDL2_ttf cannot replace them. SDL3_image is not required;
 the app uses Odin's bundled stb decoder for image previews.
 
-Package-manager commands below install system-wide for all users. Prefer this
-route because your distribution handles library paths and updates. Availability
-depends on the release, architecture, and enabled repositories: check for both
-packages before installing. If either is missing, use the source fallback below.
+For APT-based systems, this guide uses an upstream source build installed
+globally under `/usr/local`. Other distro sections use system-wide packages
+where available. Package availability depends on the release, architecture,
+and enabled repositories; use the source build if either SDL library is missing.
 Do not install packages from a different distribution release to obtain SDL3.
 
 This guide covers SDL dependencies only. See the [main README](../README.md)
@@ -16,28 +16,24 @@ for Odin, SQLite, clipboard helpers, and the remaining application requirements.
 
 ## Debian, Ubuntu, Linux Mint, Pop!_OS, Raspberry Pi OS
 
-```sh
-sudo apt update
-apt-cache policy libsdl3-dev libsdl3-ttf-dev
-# Continue only when both packages have a Candidate other than (none).
-sudo apt install libsdl3-dev libsdl3-ttf-dev pkg-config
-```
-
-On Ubuntu, SDL3_ttf is in Universe on releases that package it. Enable Universe
-if necessary, then repeat the checks:
+Use APT for the build tools and supporting libraries, then clone, build, and
+install **both SDL3 and SDL3_ttf** from upstream. The instructions here do not
+require SDL3 packages from APT repositories.
 
 ```sh
-sudo add-apt-repository universe
 sudo apt update
+sudo apt install build-essential cmake ninja-build git pkg-config \
+  libfreetype-dev libharfbuzz-dev libx11-dev libxext-dev libxrandr-dev \
+  libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+  libwayland-dev wayland-protocols libxkbcommon-dev libdecor-0-dev \
+  libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev
 ```
 
-The Universe command is Ubuntu-specific. Older Debian/Ubuntu releases and their
-derivatives may need the source fallback even after all normal repositories are
-enabled. Raspberry Pi OS availability also depends on its Debian base and CPU
-architecture.
-
-Package references: [Debian](https://packages.debian.org/search?keywords=libsdl3),
-[Ubuntu](https://packages.ubuntu.com/search?keywords=libsdl3).
+Next follow [Build and install SDL3, then SDL3_ttf](#2-build-and-install-sdl3-then-sdl3_ttf)
+for the `git clone`, CMake build, and `sudo cmake --install` commands. Finish with
+[Make shared libraries discoverable globally](#3-make-shared-libraries-discoverable-globally)
+to register `/usr/local/lib` and run `sudo ldconfig`. These steps install the
+libraries for all users, including when the app is launched from the desktop.
 
 ## Fedora
 
@@ -184,10 +180,10 @@ use the `/usr/local` fallback on NixOS.
 References: [NixOS package search](https://search.nixos.org/packages?query=sdl3),
 [Nix development shells](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell).
 
-## Global source fallback: `/usr/local`
+## Global source build: `/usr/local`
 
-Use this on conventional Linux systems when distro packages are unavailable or
-too old for your Odin bindings. It installs shared libraries, headers, CMake
+Use this for APT-based systems, and on other conventional Linux systems when
+distro packages are unavailable or too old for your Odin bindings. It installs shared libraries, headers, CMake
 metadata, and pkg-config files for all users without overwriting files in `/usr`
 owned by the distribution. Build as your normal user; only installation needs
 root. These commands use SDL 3.4.18 and SDL3_ttf 3.2.2 as explicit release examples.

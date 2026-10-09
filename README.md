@@ -58,16 +58,15 @@ different distribution release; use the source-build fallback instead.
 
 ```sh
 sudo apt update
-apt-cache policy libsdl3-dev libsdl3-ttf-dev
 sudo apt install build-essential clang pkg-config fontconfig \
   libsqlite3-dev libx11-dev wl-clipboard xclip fonts-liberation
-# Run this only if both SDL3 packages have an installation candidate:
-sudo apt install libsdl3-dev libsdl3-ttf-dev
 ```
 
-Ubuntu's SDL3_ttf development package is in Universe on releases that provide it;
-see the [Ubuntu package listing](https://packages.ubuntu.com/questing/libsdl3-ttf-dev).
-Ubuntu 24.04-based systems may need the source-build fallback.
+Install SDL3 and SDL3_ttf by cloning and building their upstream repositories.
+Use APT only for the supporting build dependencies. Follow the
+[APT source-install instructions](docs/INSTALL-SDL3.md#debian-ubuntu-linux-mint-pop_os-raspberry-pi-os)
+for the complete global installation under `/usr/local`, including the loader
+configuration needed for desktop launches.
 
 ### Fedora; RHEL, Rocky Linux, AlmaLinux, CentOS Stream
 
@@ -190,15 +189,19 @@ builds additionally require the LLVM version supported by that Odin checkout;
 follow its instructions rather than installing an arbitrary LLVM version.
 The project has no pinned or verified minimum compiler version.
 
-## 3. If SDL3 packages are unavailable: build the libraries
+## 3. Build SDL3 and SDL3_ttf from source
 
-Skip this section when both SDL3 development packages are installed. Install Git,
+For the recommended global installation on APT-based systems, follow
+[Installing SDL3 globally](docs/INSTALL-SDL3.md#global-source-build-usrlocal).
+The instructions below are an alternative installation for your user account.
+Skip them if you already installed both libraries globally or through your
+distro's package manager. Install Git,
 CMake, a C/C++ compiler, Make, FreeType and HarfBuzz development packages, and the
 development libraries for your desktop backend. Consult SDL's
 [Linux build dependencies](https://wiki.libsdl.org/SDL3/README-linux) and
 [SDL_ttf build instructions](https://github.com/libsdl-org/SDL_ttf/blob/main/INSTALL.md).
 
-For Ubuntu/Debian systems missing SDL3 packages, the following supplements step 1
+For Ubuntu/Debian source builds, the following supplements step 1
 with common desktop build dependencies:
 
 ```sh
