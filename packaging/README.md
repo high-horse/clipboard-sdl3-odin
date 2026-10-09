@@ -1,125 +1,158 @@
-# Building distro packages
+# Packaging the app
 
-Run GNU Make from the project root. Python 3, Odin, Clang/linker, `readelf`, and
-`ldd` are required. Install SDL3, SDL3_ttf, SQLite, and X11 development packages
-first; see [SDL3 installation](../docs/INSTALL-SDL3.md) and the main README.
+[README](../README.md) · [Build prerequisites](../docs/BUILDING.md) · [Troubleshooting](../docs/TROUBLESHOOTING.md)
+
+The root Makefile builds the app, stages its executable and fonts, then calls a
+native packaging tool. Outputs go into `bin/packages/`, each with a `.sha256`
+checksum file. Packaging does not install the app or enable autostart.
+
+## Choose a format
+
+| Command | Intended systems | Extra packaging tools |
+| --- | --- | --- |
+| `make deb` | Debian/Ubuntu family with packaged native libraries | `dpkg-deb`, `dpkg-architecture`, `dpkg-shlibdeps` |
+| `make rpm` | Fedora and Enterprise Linux | `rpmbuild` |
+| `make rpm RPM_DISTRO=opensuse` | openSUSE | `rpmbuild` |
+| `make arch` | Arch, CachyOS, EndeavourOS, Manjaro | `makepkg`, fakeroot, libarchive, zstd |
+| `make tarball` | Systems using manually installed libraries or other package managers | No additional packaging tool |
+| `make package` | Automatically chooses by host distro; tarball on other hosts | Tools for the selected format |
+
+The long aliases `package-deb`, `package-rpm`, `package-arch`, and
+`package-tarball` are also supported.
+
+**Build on the distro release and CPU architecture the package is intended for.**
+Choosing RPM on an Arch host does not create a Fedora-compatible binary. Use a
+matching VM/container with the app's development dependencies for each target.
+Cross compilation and native APK, Gentoo, or Nix packages are not implemented.
+
+### APT source installs and DEB packages
+
+The [APT setup](../docs/INSTALL-SDL3.md#debian-ubuntu-mint-pop_os-raspberry-pi-os)
+builds SDL under `/usr/local`. Those manually installed libraries have no Debian
+package metadata, so `dpkg-shlibdeps` may be unable to generate a valid native DEB.
+For that setup, use `make tarball`. To use `make deb`, first provide SDL libraries
+as proper packages with dependency metadata on the target build system.
+`make package` selects DEB on Debian-family hosts; use the explicit tarball target
+when SDL was installed manually.
+
+Current Makefile packages use system SDL3 and SDL3_ttf; neither library is bundled.
+Recipients need compatible runtime libraries too. The old bundled-SDL Ubuntu
+recipe is separate and historical; see [legacy notes](README-Ubuntu.md).
+
+## Install packaging tools
+
+Complete [the app build setup](../docs/BUILDING.md) first, then use the applicable
+command below. Python 3.9+, `readelf`, and `ldd` are used by the packaging helper.
+
+| Host | Command |
+| --- | --- |
+| Debian/Ubuntu | `sudo apt install dpkg-dev binutils` |
+| Fedora/Enterprise Linux | `sudo dnf install rpm-build binutils` |
+| openSUSE | `sudo zypper install rpm-build binutils` |
+| Arch family | `sudo pacman -S --needed base-devel libarchive zstd binutils` |
+
+Build packages as your normal user. Arch's makepkg refuses to run as root.
+
+## Build, inspect, and verify
 
 ```sh
-make help
-make build
-./bin/clipboard-manager
 make stage
-make package
+make tarball
 ```
 
-`make build` puts the executable and its Noto fonts in `bin/`. `make stage`
-shows the complete installation tree in `bin/stage/`. `make package` selects DEB
-on Debian/Ubuntu, RPM on Fedora/Enterprise Linux/openSUSE, Arch on Arch-based
-systems, and a tarball elsewhere. Artifacts and individual SHA-256 checksum
-files are written to `bin/packages/`. Build tools never install the package or
-enable autostart automatically.
+Replace `make tarball` with your chosen target. `make stage` previews the `/usr`
+installation tree in `bin/stage/`. Package-specific payloads and generated
+recipes remain in `bin/build/<format>/` for review.
 
-## Package targets
+The payload contains:
 
-| Target | Distributions | Additional tools |
-| --- | --- | --- |
-| `make deb` / `make package-deb` | Debian, Ubuntu, Mint, Pop!_OS, Raspberry Pi OS | `dpkg-deb`, `dpkg-architecture`, `dpkg-shlibdeps` (dpkg-dev) |
-| `make rpm` / `make package-rpm` | Fedora, RHEL, Rocky, AlmaLinux, CentOS Stream | `rpmbuild` (rpm-build) |
-| `make rpm RPM_DISTRO=opensuse` | openSUSE Tumbleweed/Leap | `rpmbuild` (rpm-build) |
-| `make arch` / `make package-arch` | Arch, CachyOS, EndeavourOS, Manjaro | `makepkg`, `fakeroot`, `bsdtar`, `zstd` (base-devel plus libarchive/zstd) |
-| `make tarball` / `make package-tarball` | Other conventional Linux systems | Python 3 standard library |
+| Path | Contents |
+| --- | --- |
+| `/usr/bin/clipboard-manager` | Symlink to the actual executable |
+| `/usr/bin/clipboard-manager-autostart` | Per-user startup helper |
+| `/usr/lib/sdl3-clipboard-manager/` | Executable, Noto fonts, and OFL notices |
+| `/usr/share/applications/` | Desktop launcher |
+| `/usr/share/doc/sdl3-clipboard-manager/` | Packaging and SDL setup notes |
 
-Examples of packaging-tool installation (in addition to app build dependencies):
+DEB uses `dpkg-shlibdeps` for versioned library requirements. RPM scans ELF
+library requirements. Arch declares dependency packages in the generated
+PKGBUILD. GTK3 and the clipboard helpers are included in dependency declarations
+because they are loaded or launched at runtime.
+
+Before sharing, verify the artifact checksum from `bin/packages/`:
+
+```sh
+cd bin/packages
+sha256sum -c sdl3-clipboard-manager-0.1.0-1-linux-x86_64.tar.gz.sha256
+```
+
+Substitute the checksum filename produced by your target. Test installation and
+launch on the intended distro; creating an archive alone does not establish
+runtime compatibility.
+
+## Set release metadata
+
+```sh
+make arch VERSION=0.2.0 RELEASE=1
+make deb VERSION=0.2.0 RELEASE=1 'MAINTAINER=Your Name <you@example.com>'
+make rpm VERSION=0.2.0 RPM_DISTRO=opensuse
+```
+
+| Variable | Default / meaning |
+| --- | --- |
+| `VERSION` | `0.1.0`; numeric dot-separated components |
+| `RELEASE` | `1`; positive integer packaging revision |
+| `MAINTAINER` | Placeholder name/email for DEB metadata; replace for distribution |
+| `RPM_DISTRO` | `fedora` or `opensuse`; selects runtime GTK package naming |
+| `ODIN` | `odin`; compiler path |
+| `ODIN_FLAGS` | `-o:speed`; custom build flags |
+
+The architecture is detected from the host/native tool. Default x86_64 builds
+use baseline x86-64 CPU features. No application-wide license is declared in the
+repository, so metadata records an unknown/custom license rather than inventing
+one. Bundled font OFL notices are included.
+
+## Install a native package
+
+Choose the matching command and use your artifact's actual filename:
 
 ```sh
 # Debian/Ubuntu
-sudo apt install make python3 binutils dpkg-dev
-# Fedora / Enterprise Linux
-sudo dnf install make python3 binutils rpm-build
-# openSUSE
-sudo zypper install make python3 binutils rpm-build
-# Arch family
-sudo pacman -S --needed base-devel python binutils libarchive zstd
-```
-
-Run the applicable command for your distro, not all four. Use normal user
-permissions for builds; Arch's makepkg explicitly refuses root.
-
-Build **on the distro release and architecture you intend to distribute to**.
-Changing the package format does not convert the binary's libc or other ABI
-requirements. For example, an Arch-built RPM is not a Fedora-compatible build.
-Use a matching VM/container with all development dependencies for each target.
-Neither ARM cross compilation nor native APK/Gentoo/Nix packaging is provided;
-the tarball uses the build host's ABI, including musl when built on Alpine.
-
-These packages depend on system SDL3 and SDL3_ttf; they do not bundle them.
-DEB dependencies are computed by `dpkg-shlibdeps`, and RPM's native ELF scanner
-generates shared-library requirements. Arch declares its runtime packages in
-the generated PKGBUILD. GTK3, `xclip`, and `wl-clipboard` are also declared for
-the tray and clipboard backends. If distro SDL packages are unavailable, native
-dependency resolution may fail even when `/usr/local` libraries work: use a
-matching library package or the tarball instead.
-
-## Versions and options
-
-```sh
-make deb VERSION=0.2.0 RELEASE=1 'MAINTAINER=Your Name <you@example.com>'
-make rpm VERSION=0.2.0 RPM_DISTRO=opensuse
-make build ODIN=/path/to/odin ODIN_FLAGS='-o:speed -extra-linker-flags:-L/usr/local/lib'
-```
-
-`VERSION` accepts numeric dot-separated versions and `RELEASE` a positive
-integer. The default version is `0.1.0-1`. The architecture comes from the build
-host/native packaging tool. x86_64 builds use the baseline `x86-64`
-microarchitecture to avoid requiring the build machine's CPU extensions.
-Native package recipes and staging files remain under `bin/build/<format>/`
-for inspection. The repository has no project-wide application license;
-metadata records this as unknown, and bundled font OFL notices are included.
-
-## Install and remove
-
-Use the package manager on the matching target system:
-
-```sh
 sudo apt install ./bin/packages/sdl3-clipboard-manager_0.1.0-1_amd64.deb
+```
+
+```sh
+# Fedora / Enterprise Linux
 sudo dnf install ./bin/packages/sdl3-clipboard-manager-0.1.0-1*.rpm
+```
+
+```sh
+# openSUSE
 sudo zypper install ./bin/packages/sdl3-clipboard-manager-0.1.0-1*.rpm
+```
+
+```sh
+# Arch family
 sudo pacman -U ./bin/packages/sdl3-clipboard-manager-0.1.0-1-x86_64.pkg.tar.zst
 ```
 
-Choose the command for your distro and substitute your actual artifact name.
-Launch `clipboard-manager` or use the application menu. The binary and fonts
-are installed under `/usr/lib/sdl3-clipboard-manager/`, with a launcher symlink
-in `/usr/bin/` and a desktop entry under `/usr/share/applications/`.
+Then launch `clipboard-manager` or select it in the application menu.
+Uninstall through the same package manager. Disable autostart first if enabled;
+user clipboard history is preserved. See [Using the app](../docs/USAGE.md).
 
-The tarball contains that same `usr/` tree. To preview it without installation,
-extract into an empty directory and run `./usr/bin/clipboard-manager` there.
-System runtime dependencies still need to be installed. For an unpackaged
-installation, GNU Make supports a prefix and staged destination:
+## Run a tarball or stage a manual install
 
-```sh
-make install PREFIX=/usr/local DESTDIR=/tmp/clipboard-install
-# Inspect /tmp/clipboard-install/usr/local before copying into the host.
-```
+Extract a tarball into an empty directory and run `./usr/bin/clipboard-manager`
+inside it. Its fonts are included; compatible system libraries and desktop
+clipboard helpers are still required. Do not copy only the executable.
 
-`make install` without `DESTDIR` writes to the host prefix and may require root.
-It builds first, so prefer building/staging as your normal user, then copying
-the staged files with the privileges required for your destination.
+For a manual system installation, follow the staged-copy instructions in
+[Building](../docs/BUILDING.md#5-install-or-package). `make install` supports
+`PREFIX` (default `/usr/local`) and `DESTDIR`; without `DESTDIR` it writes directly
+to the host prefix.
 
-Automatic startup is opt-in through the tray or
-`clipboard-manager-autostart enable`; use `clipboard-manager-autostart disable`
-before removal. Remove native packages with your distro's package manager.
-Clipboard history in the user's data directory is preserved.
-
-```sh
-make check
-make test
-make clean
-```
-
-`make clean` removes generated contents of `bin/`, preserving `.gitkeep` and
-the historical Ubuntu bundle in `dist/`. The older `packaging/build_deb.py`
-remains a separate bundled-SDL Ubuntu recipe; it is not used by these targets.
+`make clean` removes generated `bin/` contents, not the historical `dist/` bundle
+or user history.
 
 Format references: [Debian control fields](https://www.debian.org/doc/debian-policy/ch-controlfields.html),
 [RPM specs](https://rpm.org/docs/4.20.x/manual/spec.html),

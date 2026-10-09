@@ -1,75 +1,35 @@
-# Clipboard Manager for Ubuntu 24.04 (Intel/AMD)
+# Legacy Ubuntu bundle
 
-No Odin compiler is needed. Internet access is needed for Ubuntu to install any
-missing dependencies. This package is for amd64 / x86_64, not ARM or Ubuntu 22.04.
+This document describes the older bundled-SDL workflow, not the current Makefile
+packaging targets. For new builds, start with [Packaging](README.md).
 
-## Install and open
+## Existing artifact
 
-Open a terminal in the folder containing the package and run:
+`dist/sdl3-clipboard-manager_0.1.0_amd64.deb` is a historical Ubuntu 24.04 amd64
+build. It predates current source changes and is not a release of the current
+app. It bundles SDL3 and SDL3_ttf; the current Makefile packages use system
+libraries instead. The old installer was built for glibc 2.38 or newer and is
+not intended for Ubuntu 22.04 or ARM systems.
 
-```sh
-sudo apt install ./sdl3-clipboard-manager_0.1.0_amd64.deb
-clipboard-manager
-```
+The bundled artifact's presence does not establish compatibility with other
+Ubuntu releases or a clean GNOME desktop. Prefer a fresh build for your target.
 
-You can also open **Clipboard Manager** from the application menu. Click a card to
-copy it, scroll to browse, and use **Clear all** to delete history and saved files.
-Closing the window keeps the app running in the tray when tray support is available.
-Choose **Quit** from the tray to stop it.
+## Old builder
 
-## Ubuntu desktop compatibility
+`build_deb.py` takes an Odin compiler, an SDL installation prefix, and the SDL
+license files. Its dependencies and payload reflect the older app layout; it
+is retained for reference and needs review before use with current source.
+It is not invoked by `make deb`.
 
-For background clipboard monitoring on Ubuntu's GNOME desktop, use **Ubuntu on
-Xorg**: log out, select your user, select the gear menu, choose **Ubuntu on Xorg**,
-and log back in. This application uses `xclip` on X11 and `wl-clipboard` on
-Wayland. GNOME Wayland can block clipboard access while the app is in the
-background; installing this package does not remove that desktop restriction.
-Other Wayland desktops, including COSMIC, may support background access.
-
-The bundled libraries were built on a system based on Ubuntu 24.04. Packaging,
-linking, UI rendering and single-instance behavior were checked locally; a clean
-Ubuntu GNOME machine has not been used for an end-to-end test.
-
-## Start automatically
-
-Run this as your normal user, without sudo:
+The original invocation was:
 
 ```sh
-clipboard-manager-autostart enable
+python3 packaging/build_deb.py \
+  --odin /path/to/odin \
+  --sdl-prefix /path/to/sdl-prefix \
+  --sdl-license /path/to/SDL/LICENSE.txt \
+  --ttf-license /path/to/SDL_ttf/LICENSE.txt
 ```
 
-It starts quietly in the tray at your next login. To disable it:
-
-```sh
-clipboard-manager-autostart disable
-```
-
-## Keyboard shortcut
-
-Open **Settings > Keyboard > View and Customize Shortcuts > Custom Shortcuts**.
-Add a shortcut named **Clipboard Manager**, with command **clipboard-manager**.
-Use **Ctrl + Alt + V**, or another available combination. Launching again opens
-and raises the existing instance. On Wayland, focus follows the desktop's
-activation policy.
-
-Ubuntu normally uses **Super + V** for notifications. If you want to use it for
-this app instead, reassign that existing shortcut first. Existing keyboard
-shortcuts are not changed by the package.
-
-## Remove
-
-Disable automatic startup first, then uninstall:
-
-```sh
-clipboard-manager-autostart disable
-sudo apt remove sdl3-clipboard-manager
-```
-
-History is stored in `~/.local/share/sdl3-clipboard-manager` (or under
-`$XDG_DATA_HOME`). Uninstalling preserves that user data. Use **Clear all** before
-uninstalling if you want to erase the saved history.
-
-## References
-
-- Ubuntu shortcut setup: https://help.ubuntu.com/stable/ubuntu-help/keyboard-shortcuts-set.html.en
-- Wayland clipboard helper: https://github.com/bugaevc/wl-clipboard
+It writes to `dist/`, unlike current builds under `bin/`. Do not use the old
+bundle's instructions to infer requirements or features of a current package.
