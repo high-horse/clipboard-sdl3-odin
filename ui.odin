@@ -30,14 +30,16 @@ list_layout :: proc(app: ^AppState) -> List_Layout {
 		margin = 14
 	}
 
-	width := min(f32(w) - margin * 2, 880)
-
+	sidebar := resource_sidebar_width(app)
+	gap: f32
+	if sidebar > 0 { gap = 20 }
+	width := min(f32(w) - margin * 2 - sidebar - gap, 880)
 	viewport := max(f32(0), f32(h) - LIST_TOP - LIST_BOTTOM)
 
 	content := max(0, len(app.clipboard_items) * CARD_STEP - (CARD_STEP - CARD_HEIGHT))
 
 	return {
-		(f32(w) - width) / 2,
+		(f32(w) - width - sidebar - gap) / 2,
 		width,
 		f32(h) - LIST_BOTTOM,
 		viewport,
@@ -83,6 +85,7 @@ clear_history :: proc(app: ^AppState) {
 	}
 
 	app.history_generation = generation
+	clear_image_previews(app)
 
 	for item in app.clipboard_items {
 		delete(item.data)
@@ -127,6 +130,29 @@ clipboard_item_at :: proc(app: ^AppState, x, y: f32) -> int {
 	return len(app.clipboard_items) - 1 - offset
 }
 
+
+delete_item :: proc(app: ^AppState, index: int) {
+	if index < 0 || index >= len(app.clipboard_items) { return }
+	ok, files_removed := delete_saved_item(app.clipboard_items[index].hash)
+	app.history_status_until = sdl.GetTicks() + 3000
+	if !ok {
+		app.history_status = "Could not delete item. Try again."
+		return
+	}
+	remove_image_preview(app, app.clipboard_items[index].hash)
+	delete(app.clipboard_items[index].data)
+	for i := index; i < len(app.clipboard_items)-1; i += 1 {
+		app.clipboard_items[i] = app.clipboard_items[i+1]
+	}
+	resize(&app.clipboard_items, len(app.clipboard_items)-1)
+	app.selected_index = min(index, len(app.clipboard_items)-1)
+	app.pressed_index, app.copied_index = -1, -1
+	app.copied_until = 0
+	clamp_scroll(app)
+	update_tray_history(app)
+	app.history_status = "Item deleted."
+	if !files_removed { app.history_status = "Item deleted; saved file could not be removed." }
+}
 
 copy_item :: proc(app: ^AppState, index: int) {
 	if index < 0 || index >= len(app.clipboard_items) {
@@ -216,6 +242,7 @@ ui_text_run :: proc(
 	text: string,
 	x, y: f32,
 	color: sdl.Color,
+	flip: sdl.FlipMode = .NONE,
 ) -> f32 {
 	if font == nil || len(text) == 0 {
 		return 0
@@ -241,7 +268,7 @@ ui_text_run :: proc(
 
 	rect := sdl.FRect{x, y, f32(surface.w), f32(surface.h)}
 
-	sdl.RenderTexture(app.renderer, texture, nil, &rect)
+	sdl.RenderTextureRotated(app.renderer, texture, nil, &rect, 0, nil, flip)
 
 	return f32(surface.w)
 }
@@ -297,46 +324,68 @@ ui_text_wrapped :: proc(app: ^AppState, text: string, x, y: f32, color: sdl.Colo
 		return
 	}
 
-	if wrap <= 0 {
-		ui_text(app, text, x, y, color)
-
-		return
+	// Mirror only Return markers; keep the surrounding text in its normal direction.
+	marker :: "⏎"
+	cursor := x
+	start := 0
+	for r, offset in text {
+		if r != '⏎' {
+			continue
+		}
+		cursor += ui_text_run(app, font_set.primary, text[start:offset], cursor, y, color)
+		cursor += ui_text_run(app, font_set.primary, marker, cursor, y, color, .HORIZONTAL)
+		start = offset + len(marker)
 	}
-
-	// If the text contains multiple scripts, render it without
-	// forcing everything through one font. This avoids the old
-	// behavior where Devanagari was used for Latin text.
-	//
-	// The current UI preview is short enough that this is a
-	// reasonable first implementation.
-	ui_text(app, text, x, y, color)
+	ui_text_run(app, font_set.primary, text[start:], cursor, y, color)
 }
 
 
+// The caller owns the returned preview. Only the display text is changed;
+// clipboard data retains its original line endings.
 preview_text :: proc(item: database_content) -> string {
 	if strings.has_prefix(item.mime, "text/") {
 
 		text := transmute(string)item.data
 		for _, offset in text {
 			if offset >= 512 {
-				return text[:offset]
+				text = text[:offset]
+				break
 			}
 		}
 
 		if len(text) == 0 {
-			return "Empty text"
+			return strings.clone("Empty text")
 		}
 
-		return text
+		preview: strings.Builder
+		strings.builder_init(&preview)
+		for r, offset in text {
+			switch r {
+			case '\r':
+				// Treat CRLF as a single line ending.
+				if offset + 1 < len(text) && text[offset + 1] == '\n' {
+					continue
+				}
+				// The bundled Noto Sans TC fallback provides this Return arrow.
+				strings.write_string(&preview, "⏎")
+			case '\n':
+				strings.write_string(&preview, "⏎")
+			case '\t':
+				strings.write_string(&preview, "    ")
+			case:
+				strings.write_rune(&preview, r)
+			}
+		}
+		return strings.to_string(preview)
 	}
 
 	switch item.mime {
 
 	case "image/png", "image/jpeg":
-		return "Image saved to clipboard"
+		return strings.clone("Image saved to clipboard")
 
 	case:
-		return "Saved clipboard content"
+		return strings.clone("Saved clipboard content")
 	}
 }
 
@@ -527,22 +576,25 @@ render_clipboard_ui :: proc(app: ^AppState) {
 		// Action
 		// ----------------------------------------------------
 
-		action := "Click to copy"
-
-		if active {
-
-			if app.copy_failed {
-				action = "Copy failed"
-			} else {
-				action = "Copied!"
+		for action in Card_Action {
+			r := card_action_rect(app, index, action)
+			color := UI_MUTED
+			if action == .Pin && item.pinned { color = UI_ACCENT }
+			if action == .Copy && active { color = accent }
+			if mouse_x >= r.x && mouse_x < r.x+r.w && mouse_y >= r.y && mouse_y < r.y+r.h && index == hovered {
+				color = UI_TEXT
+				if action == .Delete { color = sdl.Color{255, 151, 151, 255} }
+				ui_fill(app, r, {44, 55, 73, 255})
 			}
+			card_icon(app, r, action, color, item.pinned)
 		}
-
-		ui_text_with_font(app, font_set.small, action, layout.x + layout.width - 90, y + 11, accent)
 
 		preview_top := max(f32(LIST_TOP), y + 34)
 
-		preview_bottom := min(layout.bottom, y + 78)
+		is_image := item.mime == "image/png" || item.mime == "image/jpeg"
+		preview_height := f32(44)
+		if is_image { preview_height = 60 }
+		preview_bottom := min(layout.bottom, y + 34 + preview_height)
 
 		if preview_bottom > preview_top {
 
@@ -555,14 +607,20 @@ render_clipboard_ui :: proc(app: ^AppState) {
 
 			sdl.SetRenderClipRect(app.renderer, &clip)
 
+			if is_image {
+				render_image_preview(app, item, {layout.x+16, y+34, layout.width-32, preview_height})
+			} else {
+			preview := preview_text(item)
+			defer delete(preview)
 			ui_text_wrapped(
 				app,
-				preview_text(item),
+				preview,
 				layout.x + 16,
 				y + 34,
 				UI_TEXT,
 				i32(layout.width - 32),
 			)
+			}
 
 			sdl.SetRenderClipRect(app.renderer, &viewport)
 		}
@@ -571,7 +629,7 @@ render_clipboard_ui :: proc(app: ^AppState) {
 
 		defer delete(size_label)
 
-		ui_text_with_font(app, font_set.small, size_label, layout.x + 16, y + 88, UI_MUTED)
+		ui_text_with_font(app, font_set.small, size_label, layout.x + 16, y + 98, UI_MUTED)
 		// ui_text(app, size_label, layout.x + 16, y + 88, UI_MUTED)
 	}
 
@@ -595,7 +653,7 @@ render_clipboard_ui :: proc(app: ^AppState) {
 
 	footer := "Scroll to browse  /  Up & Down to select  /  Enter to copy"
 
-	if app.width < 480 {
+	if layout.width < 580 {
 		footer = "Scroll to browse  /  Enter to copy"
 	}
 
@@ -613,6 +671,7 @@ render_clipboard_ui :: proc(app: ^AppState) {
 	}
 
 	ui_text(app, footer, layout.x, f32(app.height - 25), UI_MUTED)
+	render_resources(app, layout)
 }
 
 
@@ -642,4 +701,5 @@ move_clipboard_item_to_top :: proc(app: ^AppState, hash: string) {
 	}
 
 	app.clipboard_items[len(app.clipboard_items) - 1] = item
+	arrange_favorites(app)
 }

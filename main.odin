@@ -6,6 +6,7 @@ import "core:sync/chan"
 import "core:thread"
 
 import sdl "vendor:sdl3"
+import tray_api "tray_backend"
 
 import "clipboard"
 
@@ -27,6 +28,8 @@ AppState :: struct {
 	instance:             App_Instance,
 	running:              bool,
 	show_window:          bool,
+	resources:            Resource_Usage,
+	image_previews:        [dynamic]Image_Preview,
 	height, width:        int,
 	clipboard_items:      [dynamic]database_content,
 	copied_index:         int,
@@ -36,13 +39,15 @@ AppState :: struct {
 	pressed_index:        int,
 	copy_failed:          bool,
 	clear_pressed:        bool,
+	pressed_action:       Card_Action,
 	history_generation:   u64,
 	history_status:       string,
 	history_status_until: u64,
 
-	tray:                 ^sdl.Tray,
-	tray_history_menu:    ^sdl.TrayMenu,
+	tray:                 ^tray_api.Tray,
+	tray_history_menu:    ^tray_api.TrayMenu,
 	tray_history_data:    [dynamic]^Tray_Item_Data,
+	tray_delete_hash:     string,
 }
 
 
@@ -177,11 +182,13 @@ main :: proc() {
 		return
 	}
 	defer sdl.DestroyRenderer(app.renderer)
+	defer clear_image_previews(&app)
 	app.pointer_cursor = sdl.CreateSystemCursor(.POINTER)
 	app.default_cursor = sdl.CreateSystemCursor(.DEFAULT)
 	defer if app.pointer_cursor != nil {sdl.DestroyCursor(app.pointer_cursor)}
 	defer if app.default_cursor != nil {sdl.DestroyCursor(app.default_cursor)}
 	app.tray = create_app_tray(&app)
+	configure_window_close_behavior(&app)
 	if app.tray != nil {
 		update_tray_history(&app)
 	}
@@ -195,7 +202,7 @@ main :: proc() {
 		clear_tray_history_data(&app)
 
 		if app.tray != nil {
-			sdl.DestroyTray(app.tray)
+			tray_api.DestroyTray(app.tray)
 		}
 	}
 	ch, err := chan.create_buffered(chan.Chan(database_content), 16, context.allocator)
@@ -224,7 +231,9 @@ main :: proc() {
 
 
 mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
+	defer delete(app.tray_delete_hash)
 	for app.running {
+		tray_api.UpdateTrays()
 		poll_show_request(app)
 		event: sdl.Event
 
@@ -233,20 +242,20 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 			case .QUIT:
 				app.running = false
 			case .WINDOW_CLOSE_REQUESTED:
-				if app.tray != nil {
-					set_window_visible(app, false)
-				} else {
-					app.running = false
-				}
+				close_main_window(app)
 
 			case .KEY_DOWN:
 				#partial switch event.key.scancode {
 				case .ESCAPE:
-					if app.tray != nil {set_window_visible(app, false)} else {app.running = false}
+					close_main_window(app)
 				case .DOWN, .UP, .HOME, .END:
 					navigate_items(app, event.key.scancode)
 				case .RETURN, .SPACE:
 					if !event.key.repeat {copy_item(app, app.selected_index)}
+				case .DELETE:
+					if !event.key.repeat {delete_item(app, app.selected_index)}
+				case .P:
+					if !event.key.repeat {toggle_pin(app, app.selected_index)}
 				}
 			case .MOUSE_WHEEL:
 				delta := event.wheel.y
@@ -255,6 +264,8 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 				clamp_scroll(app)
 			case .WINDOW_RESIZED:
 				clamp_scroll(app)
+			case .RENDER_DEVICE_RESET:
+				clear_image_previews(app)
 			case .WINDOW_FOCUS_LOST:
 				app.pressed_index = -1
 				app.clear_pressed = false
@@ -262,6 +273,7 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 				if app.show_window && event.button.button == sdl.BUTTON_LEFT {
 					app.clear_pressed = clear_button_at(app, event.button.x, event.button.y)
 					app.pressed_index = clipboard_item_at(app, event.button.x, event.button.y)
+					app.pressed_action = card_action_at(app, event.button.x, event.button.y)
 				}
 			case .MOUSE_BUTTON_UP:
 				if app.show_window && event.button.button == sdl.BUTTON_LEFT {
@@ -272,19 +284,26 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 					index := clipboard_item_at(app, event.button.x, event.button.y)
 					if index >= 0 && index == app.pressed_index {
 						app.selected_index = index
-						copy_item(app, index)
+						if card_action_at(app, event.button.x, event.button.y) == app.pressed_action {
+							switch app.pressed_action {
+							case .Copy: copy_item(app, index)
+							case .Pin: toggle_pin(app, index)
+							case .Delete: delete_item(app, index)
+							}
+						}
 					}
 					app.pressed_index = -1
 				}
 			}
 		}
 
+		process_tray_delete(app)
 		for {
 			item, ok := chan.try_recv(ch)
 			if !ok {
 				break
 			}
-			if item.generation != app.history_generation {
+			if item.generation != app.history_generation || !database_has_hash(item.hash) {
 				delete(item.data)
 				delete(item.hash)
 				continue
@@ -304,6 +323,7 @@ mainloop :: proc(app: ^AppState, ch: chan.Chan(database_content)) {
 			}
 
 			append(&app.clipboard_items, item)
+			arrange_favorites(app)
 			enforce_max_entries(app)
 			update_tray_history(app)
 
@@ -347,7 +367,10 @@ enforce_max_entries :: proc(app: ^AppState) {
 		return
 	}
 
-	for len(app.clipboard_items) > max_entries {
+	unpinned := 0
+	for item in app.clipboard_items { if !item.pinned { unpinned += 1 } }
+	for unpinned > max_entries {
+		unpinned -= 1
 		oldest := app.clipboard_items[0]
 
 		ordered_remove(&app.clipboard_items, 0)

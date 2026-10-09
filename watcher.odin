@@ -11,6 +11,7 @@ import "clipboard"
 import sdl "vendor:sdl3"
 
 database_content :: struct {
+	pinned:       bool,
 	generation:   u64,
 	data:         []u8,
 	mime:         string,

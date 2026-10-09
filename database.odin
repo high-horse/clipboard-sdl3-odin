@@ -71,6 +71,44 @@ clear_saved_history :: proc() -> (generation: u64, ok, files_removed: bool) {
 	return
 }
 
+delete_saved_item :: proc(hash: string) -> (ok, files_removed: bool) {
+	sync.mutex_lock(&history_mutex)
+	defer sync.mutex_unlock(&history_mutex)
+	db, ready := get_db()
+	if !ready { return }
+	hash_cs := strings.clone_to_cstring(hash, context.temp_allocator)
+	paths := make([dynamic]string)
+	defer {
+		for path in paths { delete(path) }
+		delete(paths)
+	}
+	stmt: ^sql.Statement
+	if sql.prepare_v2(db.db, "SELECT DISTINCT content_path FROM clipboard_contents WHERE hash = ?", -1, &stmt, nil) != .Ok { return }
+	if sql.bind_text(stmt, 1, hash_cs, c.int(len(hash)), sql.Destructor{behaviour = .Static}) != .Ok {
+		sql.finalize(stmt)
+		return
+	}
+	for {
+		rc := sql.step(stmt)
+		if rc == .Done { break }
+		if rc != .Row { sql.finalize(stmt); return }
+		append(&paths, strings.clone(string(sql.column_text(stmt, 0))))
+	}
+	sql.finalize(stmt)
+	if sql.prepare_v2(db.db, "DELETE FROM clipboard_contents WHERE hash = ?", -1, &stmt, nil) != .Ok { return }
+	defer sql.finalize(stmt)
+	if sql.bind_text(stmt, 1, hash_cs, c.int(len(hash)), sql.Destructor{behaviour = .Static}) != .Ok { return }
+	if sql.step(stmt) != .Done { return }
+	ok, files_removed = true, true
+	for path in paths {
+		if filepath.dir(path) != db.blob_dir { files_removed = false; continue }
+		if os.exists(path) {
+			if os.remove(path) != nil { files_removed = false }
+		}
+	}
+	return
+}
+
 get_db :: proc() -> (^Database, bool) {
 	if !g_db.initialized || g_db.db == nil {
 		fmt.println("ERROR: database has not been initialized yet")
@@ -139,6 +177,7 @@ prepare_table :: proc(db: ^Database) -> bool {
 			content_path TEXT NOT NULL,
 			mime TEXT NOT NULL,
 			hash TEXT NOT NULL,
+			pinned INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
@@ -152,6 +191,15 @@ prepare_table :: proc(db: ^Database) -> bool {
 		return false
 	}
 
+	// Upgrade existing history databases without losing entries.
+	columns: ^sql.Statement
+	if sql.prepare_v2(db.db, "PRAGMA table_info(clipboard_contents)", -1, &columns, nil) != .Ok { return false }
+	has_pinned := false
+	for sql.step(columns) == .Row {
+		if string(sql.column_text(columns, 1)) == "pinned" { has_pinned = true }
+	}
+	sql.finalize(columns)
+	if !has_pinned && sql.exec(db.db, "ALTER TABLE clipboard_contents ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0", nil, nil, nil) != .Ok { return false }
 	fmt.println("Database tables prepared.")
 
 	return true
@@ -288,8 +336,8 @@ load_all_contents :: proc() -> ([dynamic]database_content, bool) {
 	results := make([dynamic]database_content, 0, 16, context.allocator)
 
 	query := `
-		SELECT content_path, mime, hash FROM clipboard_contents
-		ORDER BY id ASC;
+		SELECT content_path, mime, hash, pinned FROM clipboard_contents
+		ORDER BY pinned ASC, id ASC;
 	`
 	query_cs := strings.clone_to_cstring(query, context.temp_allocator)
 
@@ -327,6 +375,7 @@ load_all_contents :: proc() -> ([dynamic]database_content, bool) {
 		}
 
 		item := database_content {
+			pinned       = sql.column_int(stmt, 3) != 0,
 			data         = data,
 			mime         = strings.clone(mime, context.allocator),
 			hash         = strings.clone(hash, context.allocator),
@@ -395,8 +444,8 @@ trim_dataset :: proc(db: ^Database) -> bool {
 
 	select_query := `
 		SELECT content_path FROM clipboard_contents
-		WHERE id NOT IN (
-			SELECT id FROM clipboard_contents ORDER BY id DESC LIMIT ?
+		WHERE pinned = 0 AND id NOT IN (
+			SELECT id FROM clipboard_contents WHERE pinned = 0 ORDER BY id DESC LIMIT ?
 		);
 	`
 	select_cs := strings.clone_to_cstring(select_query, context.temp_allocator)
@@ -433,8 +482,8 @@ trim_dataset :: proc(db: ^Database) -> bool {
 
 	delete_query := `
 		DELETE FROM clipboard_contents
-		WHERE id NOT IN (
-			SELECT id FROM clipboard_contents ORDER BY updated_at DESC LIMIT ?
+		WHERE pinned = 0 AND id NOT IN (
+			SELECT id FROM clipboard_contents WHERE pinned = 0 ORDER BY id DESC LIMIT ?
 		);
 	`
 	delete_cs := strings.clone_to_cstring(delete_query, context.temp_allocator)
