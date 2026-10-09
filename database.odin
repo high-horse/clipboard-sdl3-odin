@@ -293,7 +293,7 @@ load_config :: proc(db: ^Database) -> bool {
 	if err != nil {
 		fmt.printfln("failed to read config file: %v", err)
 		db.config = Config {
-			max_entries = 5,
+			max_entries = 100,
 		}
 		return save_config(db)
 	}
